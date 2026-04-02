@@ -1,0 +1,151 @@
+import { BadRequestException } from '@nestjs/common';
+
+export type AuthType   = 'oauth' | 'credentials';
+export type AuthMethod = 'body'  | 'basic';
+
+export interface ProviderMetadata { displayName: string; logo: string; color: string; }
+
+export interface OAuthProviderConfig {
+  authType:              'oauth';
+  authUrl:               string;
+  tokenUrl:              string;
+  refreshUrl?:           string;
+  apiDomain:             string;
+  scopes:                string[];
+  scopeSeparator:        ',' | ' ';
+  redirectUrl:           string;
+  authMethod:            AuthMethod;
+  pkce?:                 boolean;
+  userIdPath?:           string;
+  promptConsent?:        boolean;
+  dynamicAuthUrl?:       boolean;
+  dynamicUrl?:           boolean;
+  tokenContentType?:     'json' | 'form';
+  rotatesRefreshToken?:  boolean;
+  metadata:              ProviderMetadata;
+}
+
+export interface CredentialProviderConfig {
+  authType: 'credentials'; apiDomain?: string; requiredFields: string[];
+  metadata: ProviderMetadata;
+}
+
+export type ProviderConfig = OAuthProviderConfig | CredentialProviderConfig;
+
+export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
+
+  zoho: {
+    authType: 'oauth', authMethod: 'body', pkce: false,
+    authUrl:    'https://accounts.zoho.com/oauth/v2/auth',
+    tokenUrl:   'https://accounts.zoho.com/oauth/v2/token',
+    refreshUrl: 'https://accounts.zoho.com/oauth/v2/token',
+    apiDomain: 'https://www.zohoapis.com/crm/v3/', scopeSeparator: ',',
+    redirectUrl: process.env.ZOHO_REDIRECT_URL || 'https://app.callerdesk.io/admin/zohodesk-data',
+    scopes: ['ZohoCRM.modules.ALL','ZohoCRM.settings.ALL','ZohoCRM.users.READ','Desk.contacts.ALL','Desk.tickets.ALL','Desk.basic.READ','Desk.settings.ALL'],
+    promptConsent: true,
+    userIdPath: 'user_id',
+    metadata: { displayName: 'Zoho CRM & Desk', logo: 'https://cdn.simpleicons.org/zoho/E42527', color: '#E42527' },
+  },
+
+  hubspot: {
+    authType: 'oauth', authMethod: 'body', pkce: false,
+    authUrl:    'https://app.hubspot.com/oauth/authorize',
+    tokenUrl:   'https://api.hubapi.com/oauth/v1/token',
+    refreshUrl: 'https://api.hubapi.com/oauth/v1/token',
+    apiDomain: 'https://api.hubapi.com/', scopeSeparator: ' ',
+    redirectUrl: process.env.HUBSPOT_REDIRECT_URL || 'https://app.callerdesk.io/admin/hubspot-data',
+    scopes: ['crm.objects.contacts.read','crm.objects.contacts.write','crm.objects.deals.read','crm.objects.deals.write','crm.objects.calls.write','tickets'],
+    userIdPath: 'hub_id',
+    metadata: { displayName: 'HubSpot', logo: 'https://cdn.simpleicons.org/hubspot/FF7A59', color: '#FF7A59' },
+  },
+
+  salesforce: {
+    authType: 'oauth', authMethod: 'body', pkce: false,
+    authUrl:    'https://login.salesforce.com/services/oauth2/authorize',
+    tokenUrl:   'https://login.salesforce.com/services/oauth2/token',
+    refreshUrl: 'https://login.salesforce.com/services/oauth2/token',
+    apiDomain: 'https://login.salesforce.com/services/data/v59.0/', scopeSeparator: ' ',
+    redirectUrl: process.env.SALESFORCE_REDIRECT_URL || 'https://app.callerdesk.io/admin/salesforce-data',
+    scopes: ['api','refresh_token','offline_access'],
+    userIdPath: 'id',
+    metadata: { displayName: 'Salesforce', logo: '', color: '#00A1E0' },
+  },
+
+  pipedrive: {
+    authType: 'oauth', authMethod: 'basic', pkce: false,
+    authUrl:    'https://oauth.pipedrive.com/oauth/authorize',
+    tokenUrl:   'https://oauth.pipedrive.com/oauth/token',
+    refreshUrl: 'https://oauth.pipedrive.com/oauth/token',
+    apiDomain: 'https://api.pipedrive.com/v1/', scopeSeparator: ' ', scopes: [],
+    redirectUrl: process.env.PIPEDRIVE_REDIRECT_URL || 'https://app.callerdesk.io/admin/pipedrive-data',
+    rotatesRefreshToken: true,
+    userIdPath: 'data.id',
+    metadata: { displayName: 'Pipedrive', logo: '', color: '#1A1A2E' },
+  },
+
+  kommo: {
+    authType: 'credentials', requiredFields: ['subDomain','token'],
+    metadata: { displayName: 'Kommo', logo: '', color: '#339AF0' },
+  },
+
+  bitrix24: {
+    authType: 'credentials', requiredFields: ['bitrixUrl','clientId','clientSecret'],
+    metadata: { displayName: 'Bitrix24', logo: '', color: '#E53935' },
+  },
+
+  shopify: {
+    authType: 'credentials', requiredFields: ['clientId','clientSecret','subDomain'],
+    metadata: { displayName: 'Shopify', logo: 'https://cdn.simpleicons.org/shopify/96BF48', color: '#96BF48' },
+  },
+
+  odoo: {
+    authType: 'credentials', requiredFields: ['odooUrl','databaseName','userEmail','apiKey'],
+    metadata: { displayName: 'Odoo', logo: 'https://cdn.simpleicons.org/odoo/875A7B', color: '#875A7B' },
+  },
+
+  examplecrm2: {
+    authType:       'credentials',
+    requiredFields: ['apiKey', 'subdomain'],
+    metadata: { displayName: 'ExampleCRM2', logo: '', color: '#FF5733' },
+  },
+
+  freshdesk: {
+    authType: 'credentials', requiredFields: ['bundleAlias','apiKey'],
+    metadata: { displayName: 'Freshdesk', logo: '', color: '#27B4AC' },
+  },
+
+  examplecrm: {
+    authType:     'oauth',
+    authMethod:   'body',
+    pkce:         false,
+    authUrl:      'https://examplecrm.com/oauth/authorize',
+    tokenUrl:     'https://examplecrm.com/oauth/token',
+    refreshUrl:   'https://examplecrm.com/oauth/token',
+    apiDomain:    'https://api.examplecrm.com/',
+    scopes:       ['contacts.read', 'contacts.write'],
+    scopeSeparator: ' ',
+    redirectUrl:  process.env.EXAMPLECRM_REDIRECT_URL || 'https://app.callerdesk.io/admin/examplecrm-data',
+    userIdPath:   'user_id',
+    metadata: { displayName: 'ExampleCRM', logo: '', color: '#6C63FF' },
+  },
+
+  freshsales: {
+    authType: 'oauth', authMethod: 'basic', pkce: false,
+    authUrl:    'https://{subdomain}/org/oauth/v2/authorize',
+    tokenUrl:   'https://{subdomain}/org/oauth/v2/token',
+    refreshUrl: 'https://{subdomain}/org/oauth/v2/token',
+    apiDomain:  'https://{subdomain}/',
+    scopeSeparator: ' ',
+    scopes: ['contact.view', 'contact.manage'],
+    redirectUrl: process.env.FRESHSALES_REDIRECT_URL || 'https://app.callerdesk.io/admin/freshsales-data',
+    dynamicAuthUrl: true,
+    userIdPath: 'id',
+    metadata: { displayName: 'Freshsales', logo: '', color: '#0CA560' },
+  },
+};
+
+export function getProviderConfig(provider: string): ProviderConfig {
+  const config = CRM_PROVIDERS[provider.toLowerCase()];
+  if (!config) throw new BadRequestException(`Provider "${provider}" is not supported.`);
+  return config;
+}
