@@ -26,6 +26,12 @@ export class IntegrationEntity {
   @Column({ name: 'credentials_enc', type: 'text', nullable: true, select: false })
   credentialsEnc: string | null;
 
+  @Column({ name: 'client_id_enc', type: 'text', nullable: true, select: false })
+  clientIdEnc: string | null;
+
+  @Column({ name: 'client_secret_enc', type: 'text', nullable: true, select: false })
+  clientSecretEnc: string | null;
+
   @Column({ name: 'token_type', length: 50, nullable: true })
   tokenType: string | null;
 

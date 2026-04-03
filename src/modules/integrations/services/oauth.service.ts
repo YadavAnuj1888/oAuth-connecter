@@ -143,6 +143,8 @@ export class OAuthService {
       refreshToken: normalized.refreshToken,
       tokenType:    normalized.tokenType,
       expiresAt:    normalized.expiresAt,
+      clientId,
+      clientSecret,
     });
   }
 
@@ -206,6 +208,8 @@ export class OAuthService {
     expiresAt:    Date | null;
     email?:       string | null;
     credentials?: Record<string, any> | null;
+    clientId?:    string;
+    clientSecret?: string;
   }): Promise<IntegrationEntity> {
     const existing = await this.repo.findOne({
       where:  { accountId: data.accountId, provider: data.provider },
@@ -213,14 +217,16 @@ export class OAuthService {
     });
 
     const patch = {
-      apiDomain:       data.apiDomain,
-      tokenType:       data.tokenType,
-      expiresAt:       data.expiresAt,
-      email:           data.email      ?? null,
-      isActive:        true,
-      accessTokenEnc:  this.encryption.encrypt(data.accessToken),
-      refreshTokenEnc: data.refreshToken ? this.encryption.encrypt(data.refreshToken) : null,
-      credentialsEnc:  data.credentials  ? this.encryption.encrypt(JSON.stringify(data.credentials)) : null,
+      apiDomain:        data.apiDomain,
+      tokenType:        data.tokenType,
+      expiresAt:        data.expiresAt,
+      email:            data.email      ?? null,
+      isActive:         true,
+      accessTokenEnc:   this.encryption.encrypt(data.accessToken),
+      refreshTokenEnc:  data.refreshToken ? this.encryption.encrypt(data.refreshToken) : null,
+      credentialsEnc:   data.credentials  ? this.encryption.encrypt(JSON.stringify(data.credentials)) : null,
+      clientIdEnc:      data.clientId     ? this.encryption.encrypt(data.clientId)     : null,
+      clientSecretEnc:  data.clientSecret ? this.encryption.encrypt(data.clientSecret) : null,
     };
 
     if (existing?.refreshJobId) {
@@ -262,7 +268,8 @@ export class OAuthService {
     const full = await this.repo.findOne({
       where:  { id: entity.id as number, accountId: entity.accountId },
       select: ['id','accountId','provider','apiDomain','tokenType','email','expiresAt',
-               'isActive','createdAt','updatedAt','accessTokenEnc','refreshTokenEnc','credentialsEnc'],
+               'isActive','createdAt','updatedAt','accessTokenEnc','refreshTokenEnc','credentialsEnc',
+               'clientIdEnc','clientSecretEnc'],
     });
     if (!full) throw new NotFoundException('Integration not found.');
     return this.decryptInPlace(full);

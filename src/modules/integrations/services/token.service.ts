@@ -38,11 +38,11 @@ export class TokenService {
     const config = getProviderConfig(provider) as OAuthProviderConfig;
     if (config.authType !== 'oauth') throw new BadRequestException(`${provider} is not an OAuth provider.`);
 
-    const clientId     = process.env[`${provider.toUpperCase()}_CLIENT_ID`];
-    const clientSecret = process.env[`${provider.toUpperCase()}_CLIENT_SECRET`];
+    const clientId     = entity.clientIdEnc     ? this.encryption.decrypt(entity.clientIdEnc)     : null;
+    const clientSecret = entity.clientSecretEnc ? this.encryption.decrypt(entity.clientSecretEnc) : null;
     if (!clientId || !clientSecret) {
       throw new BadRequestException(
-        `Missing OAuth credentials for ${provider}. Set ${provider.toUpperCase()}_CLIENT_ID / _CLIENT_SECRET in .env`,
+        `Missing stored OAuth credentials for ${provider}. Please reconnect.`,
       );
     }
 
@@ -202,7 +202,8 @@ export class TokenService {
       where:  { accountId, provider: provider.toLowerCase(), isActive: true },
       select: ['id','accountId','provider','apiDomain','tokenType','email','expiresAt',
                'isActive','createdAt','updatedAt','refreshJobId',
-               'accessTokenEnc','refreshTokenEnc','credentialsEnc'],
+               'accessTokenEnc','refreshTokenEnc','credentialsEnc',
+               'clientIdEnc','clientSecretEnc'],
     });
     if (!entity) throw new NotFoundException(`No active ${provider} connection for account ${accountId}.`);
     return entity;
