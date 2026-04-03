@@ -2,13 +2,14 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { createClient, RedisClientType } from 'redis';
 
 export interface OAuthState {
-  provider:     string;
-  accountId:    string;
-  codeVerifier: string | null;
-  createdAt:    number;
-  clientId?:    string;
-  clientSecret?: string;
-  meta?:        Record<string, string>;
+  provider:      string;
+  accountId:     string;
+  codeVerifier:  string | null;
+  createdAt:     number;
+  clientId:      string;
+  clientSecret:  string;
+  redirectUri:   string;
+  meta?:         Record<string, string>;
 }
 
 const TTL           = 600;

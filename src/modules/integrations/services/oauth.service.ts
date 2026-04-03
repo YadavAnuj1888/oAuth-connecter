@@ -22,6 +22,10 @@ export class OAuthService {
     private readonly refreshQueue: TokenRefreshQueue,
   ) {}
 
+  /**
+   * Step 1: Generate OAuth auth URL.
+   * Tenant provides client_id, client_secret, redirect_uri — stored in Redis state.
+   */
   async getAuthUrl(
     provider: string,
     accountId: string,
@@ -30,15 +34,18 @@ export class OAuthService {
     const config = getProviderConfig(provider) as OAuthProviderConfig;
     if (config.authType !== 'oauth') throw new BadRequestException(`${provider} does not use OAuth.`);
 
-    const clientId     = body.client_id     || process.env[`${provider.toUpperCase()}_CLIENT_ID`];
-    const clientSecret = body.client_secret || process.env[`${provider.toUpperCase()}_CLIENT_SECRET`];
+    const clientId     = body.client_id;
+    const clientSecret = body.client_secret;
     if (!clientId || !clientSecret) {
-      this.logger.warn(`Missing OAuth config for provider: ${provider}`);
+      this.logger.warn(`Missing client_id or client_secret for ${provider}, accountId: ${accountId}`);
       return null;
     }
 
-    const redirectUri = body.redirect_uri || config.redirectUrl;
-    const state       = crypto.randomBytes(32).toString('hex');
+    // Redirect URI: tenant can override, otherwise use backend callback
+    const defaultRedirect = `${process.env.BASE_URL || 'http://localhost:3000'}/api/oauth/callback/${provider}`;
+    const redirectUri = body.redirect_uri || defaultRedirect;
+
+    const state = crypto.randomBytes(32).toString('hex');
 
     let codeVerifier:  string | null = null;
     let codeChallenge: string | null = null;
@@ -51,14 +58,15 @@ export class OAuthService {
     const meta: Record<string, string> = {};
     if (config.dynamicAuthUrl) {
       const subdomain = body.subdomain;
-      if (!subdomain) throw new BadRequestException(`${provider} requires body.subdomain.`);
+      if (!subdomain) throw new BadRequestException(`${provider} requires subdomain.`);
       authUrl = authUrl.replace('{subdomain}', subdomain);
       meta.subdomain = subdomain;
     }
 
+    // Store everything in Redis — 10 min TTL
     await this.stateStore.save(state, {
       provider, accountId, codeVerifier, createdAt: Date.now(),
-      clientId, clientSecret,
+      clientId, clientSecret, redirectUri,
       ...(Object.keys(meta).length ? { meta } : {}),
     });
 
@@ -73,15 +81,18 @@ export class OAuthService {
     if (config.scopes.length > 0) {
       params.scope = config.scopes.join(config.scopeSeparator);
     }
-    if (config.promptConsent)    { params.prompt = 'consent'; }
+    if (config.promptConsent)     { params.prompt = 'consent'; }
     if (provider === 'pipedrive') { delete params.scope; delete params.access_type; }
     if (codeChallenge)            { params.code_challenge = codeChallenge; params.code_challenge_method = 'S256'; }
 
     const fullAuthUrl = `${authUrl}?${new URLSearchParams(params)}`;
-    this.logger.log(`Auth URL generated for provider: ${provider}, accountId: ${accountId}`);
+    this.logger.log(`Auth URL generated — provider: ${provider}, accountId: ${accountId}, redirect: ${redirectUri}`);
     return { authUrl: fullAuthUrl, state, provider };
   }
 
+  /**
+   * Step 2: Handle OAuth callback — exchange code for tokens using credentials from Redis state.
+   */
   async handleOAuthCallback(
     provider:  string,
     code:      string,
@@ -95,18 +106,27 @@ export class OAuthService {
     const stateData = await this.stateStore.verifyAndDelete(state, provider, accountId);
     if (!stateData) throw new UnauthorizedException('Invalid, expired, or tenant-mismatched OAuth state.');
 
-    const clientId     = stateData.clientId     || process.env[`${provider.toUpperCase()}_CLIENT_ID`];
-    const clientSecret = stateData.clientSecret || process.env[`${provider.toUpperCase()}_CLIENT_SECRET`];
+    // All credentials come from Redis state — stored by getAuthUrl()
+    const { clientId, clientSecret, redirectUri } = stateData;
     if (!clientId || !clientSecret) throw new BadRequestException(`Missing OAuth credentials for ${provider}.`);
 
-    const subdomain = stateData.meta?.subdomain;
-    const tokenUrlOverride = subdomain && config.dynamicAuthUrl
-      ? config.tokenUrl.replace('{subdomain}', subdomain)
-      : undefined;
+    this.logger.log(`Token exchange — provider: ${provider}, accountId: ${accountId}`);
 
-    const rawToken   = await this.exchangeCodeForToken({
+    const subdomain = stateData.meta?.subdomain;
+    let tokenUrlOverride: string | undefined;
+    if (subdomain && config.dynamicAuthUrl) {
+      tokenUrlOverride = config.tokenUrl.replace('{subdomain}', subdomain);
+    }
+    // Zoho: use region-specific accounts-server for token exchange
+    const accountsServer = query['accounts-server'];
+    if (provider === 'zoho' && accountsServer) {
+      tokenUrlOverride = `${accountsServer}/oauth/v2/token`;
+      this.logger.log(`Zoho region detected: ${accountsServer}`);
+    }
+
+    const rawToken = await this.exchangeCodeForToken({
       config, clientId, clientSecret, code,
-      redirectUri: config.redirectUrl,
+      redirectUri,
       codeVerifier: stateData.codeVerifier,
       tokenUrlOverride,
     });
@@ -114,6 +134,8 @@ export class OAuthService {
     if (!normalized.accessToken) throw new BadRequestException('Token exchange returned no access_token.');
 
     const apiDomain = rawToken.instance_url || this.resolveApiDomain(config, query, subdomain);
+
+    this.logger.log(`Tokens received — provider: ${provider}, accountId: ${accountId}, storing in DB`);
 
     return this.upsertIntegration({
       accountId, provider, apiDomain,
@@ -166,7 +188,11 @@ export class OAuthService {
     }
 
     const res = await safeFetch(tokenUrl, { method: 'POST', headers, body: bodyStr, timeoutMs: 15000, retries: 2 });
-    if (!res.ok) throw new BadRequestException(`Token exchange failed: ${await res.text()}`);
+    if (!res.ok) {
+      const errBody = await res.text();
+      this.logger.error(`Token exchange failed for ${p.config.authUrl}: ${errBody}`);
+      throw new BadRequestException(`Token exchange failed: ${errBody}`);
+    }
     return res.json();
   }
 
@@ -218,6 +244,7 @@ export class OAuthService {
       }
     }
 
+    this.logger.log(`Integration saved — provider: ${data.provider}, accountId: ${data.accountId}, id: ${entity.id}`);
     return entity;
   }
 

@@ -16,7 +16,7 @@ import { OAuthService }      from '../services/oauth.service';
 import { TokenService }      from '../services/token.service';
 import { CredentialService } from '../services/credential.service';
 import { CRM_PROVIDERS }     from '../providers/crm.providers';
-import { ConnectRequestDto, OAuthCallbackDto } from '../dto/connect.dto';
+import { ConnectRequestDto } from '../dto/connect.dto';
 
 type AuthReq = Request & { accountId: string };
 
@@ -85,7 +85,7 @@ export class IntegrationsController {
   @ApiResponse({ status: 401, description: 'Missing or invalid JWT' })
   async connect(
     @Param('provider') provider: string,
-    @Body(new ValidationPipe({ whitelist: true })) body: ConnectRequestDto,
+    @Body() body: ConnectRequestDto,
     @Req() req: AuthReq,
   ) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
@@ -226,35 +226,81 @@ export class CallerdeskController {
   }
 
   @Get('crm/:provider/auth')
-  @ApiOperation({ summary: 'Get OAuth auth URL for a provider' })
+  @ApiOperation({ summary: 'Get OAuth auth URL — multi-tenant', description: 'Each tenant provides their own OAuth credentials. No server-side env config needed.' })
   @ApiParam(PROVIDER_PARAM)
-  @ApiQuery({ name: 'account_id',    required: true,  description: 'Your tenant / account ID',               example: '97106'      })
-  @ApiQuery({ name: 'client_id',     required: true,  description: 'OAuth client ID from the CRM app',       example: '1000.XXXXX' })
-  @ApiQuery({ name: 'client_secret', required: true,  description: 'OAuth client secret from the CRM app',   example: 'abc123'     })
-  @ApiResponse({ status: 200, description: 'Returns OAuth redirect URL', schema: { type: 'object', properties: { authUrl: { type: 'string' } } } })
-  @ApiResponse({ status: 400, description: 'Provider not supported or missing OAuth config' })
+  @ApiQuery({ name: 'account_id',    required: true,  description: 'Your tenant / account ID',                example: '97106' })
+  @ApiQuery({ name: 'client_id',     required: true,  description: 'OAuth client ID from the CRM app',        example: '1000.XXXXX' })
+  @ApiQuery({ name: 'client_secret', required: true,  description: 'OAuth client secret from the CRM app',    example: 'abc123' })
+  @ApiQuery({ name: 'redirect_uri',  required: false, description: 'Custom redirect URI (defaults to backend callback)', example: 'http://localhost:3000/api/oauth/callback/zoho' })
+  @ApiResponse({ status: 200, description: 'Returns OAuth redirect URL' })
+  @ApiResponse({ status: 400, description: 'Provider not supported or missing config' })
   async getAuthUrl(
     @Param('provider') provider: string,
     @Query('account_id') accountId: string,
     @Query('client_id') clientId: string,
     @Query('client_secret') clientSecret: string,
+    @Query('redirect_uri') redirectUri: string,
   ) {
     const p = provider.toLowerCase();
-    console.log('Auth URL requested for:', p);
     if (!CRM_PROVIDERS[p]) throw new BadRequestException(`Provider "${p}" is not supported.`);
     const config = CRM_PROVIDERS[p];
     if (config.authType !== 'oauth') throw new BadRequestException(`Provider "${p}" does not use OAuth.`);
-    try {
-      const result = await this.oauthSvc.getAuthUrl(p, accountId || 'anonymous', { client_id: clientId, client_secret: clientSecret });
-      if (!result) {
-        console.warn('Missing OAuth config:', p);
-        return { success: false, message: 'OAuth config missing. Provide client_id and client_secret.' };
-      }
-      return { authUrl: result.authUrl };
-    } catch {
-      console.warn('Missing OAuth config:', p);
-      return { success: false, message: 'OAuth config missing' };
-    }
+    if (!accountId) throw new BadRequestException('account_id is required.');
+    if (!clientId || !clientSecret) throw new BadRequestException('client_id and client_secret are required.');
+
+    const result = await this.oauthSvc.getAuthUrl(p, accountId, {
+      client_id: clientId,
+      client_secret: clientSecret,
+      ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+    });
+    if (!result) return { success: false, message: 'Failed to generate auth URL.' };
+    return { authUrl: result.authUrl };
+  }
+
+  @Post('crm/:provider/callback')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange OAuth code for tokens', description: 'Frontend sends the code and state from the OAuth redirect URL. Backend exchanges for access/refresh tokens and stores in DB.' })
+  @ApiParam(PROVIDER_PARAM)
+  @ApiConsumes('application/json', 'application/x-www-form-urlencoded', 'multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['code', 'state'],
+      properties: {
+        code:             { type: 'string', description: 'Authorization code from OAuth redirect' },
+        state:            { type: 'string', description: 'State token from OAuth redirect' },
+        'accounts-server': { type: 'string', description: 'Zoho region server (optional)', example: 'https://accounts.zoho.in' },
+        location:         { type: 'string', description: 'Zoho location (optional)', example: 'in' },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Tokens exchanged and stored' })
+  @ApiResponse({ status: 400, description: 'Invalid code, expired state, or exchange failure' })
+  async oauthExchange(
+    @Param('provider') provider: string,
+    @Body() body: Record<string, string>,
+  ) {
+    const p = provider.toLowerCase();
+    if (!CRM_PROVIDERS[p]) throw new BadRequestException(`Provider "${p}" is not supported.`);
+    const { code, state, ...rest } = body;
+    if (!code || !state) throw new BadRequestException('Missing code or state');
+
+    const stateData = await this.oauthSvc['stateStore'].get(state);
+    if (!stateData) throw new BadRequestException('Invalid or expired state. Try connecting again.');
+    const accountId = stateData.accountId || 'unknown';
+
+    console.log(`OAuth callback for ${p}, accountId: ${accountId}`);
+
+    const entity = await this.oauthSvc.handleOAuthCallback(p, code, state, accountId, rest);
+    return {
+      success:    true,
+      provider:   p,
+      accountId:  entity.accountId,
+      apiDomain:  entity.apiDomain,
+      tokenType:  entity.tokenType,
+      expiresAt:  entity.expiresAt,
+      createdAt:  entity.createdAt,
+    };
   }
 
   @Post('crm/hubspot/detail')
@@ -360,16 +406,19 @@ export class CallerdeskController {
   @ApiResponse({ status: 400, description: 'Invalid state, expired state, or token exchange failure' })
   async oauthCallback(
     @Param('provider') provider: string,
-    @Query(new ValidationPipe({ whitelist: true })) query: OAuthCallbackDto & Record<string, string>,
+    @Query() query: Record<string, string>,
   ) {
     const { code, state, ...rest } = query;
     const stateData = await this.oauthSvc['stateStore'].get(state);
     const accountId = stateData?.accountId || 'unknown';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     try {
       const entity = await this.oauthSvc.handleOAuthCallback(provider.toLowerCase(), code, state, accountId, rest);
-      return `<html><body><h2>&#x2705; ${provider} connected!</h2><p>Account: ${entity.accountId}</p><script>window.close();</script></body></html>`;
+      console.log(`${provider} connected for accountId: ${entity.accountId} — tokens stored in DB`);
+      return `<html><body><h2>&#x2705; ${provider} connected!</h2><p>Account: ${entity.accountId}</p><p>Tokens stored. Redirecting...</p><script>setTimeout(function(){ window.location.href="${frontendUrl}?provider=${provider}&connected=true&accountId=${entity.accountId}"; }, 1500);</script></body></html>`;
     } catch (err: any) {
-      throw new BadRequestException(`OAuth callback failed for ${provider}: ${err.message}`);
+      console.error(`OAuth callback failed for ${provider}:`, err.message);
+      return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>${err.message}</p><script>setTimeout(function(){ window.location.href="${frontendUrl}?provider=${provider}&connected=false&error=${encodeURIComponent(err.message)}"; }, 3000);</script></body></html>`;
     }
   }
 }

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUrl, IsEmail } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ConnectOAuthDto {
@@ -17,19 +17,19 @@ export class ConnectOAuthDto {
 
 export class ConnectCredentialsDto {
   @ApiProperty({ required: false, example: 'https://myodoo.com', description: 'Odoo instance URL' })
-  @IsOptional() @IsUrl() odooUrl?: string;
+  @IsOptional() @IsString() odooUrl?: string;
 
   @ApiProperty({ required: false, example: 'mydb', description: 'Odoo database name' })
   @IsOptional() @IsString() databaseName?: string;
 
   @ApiProperty({ required: false, example: 'admin@mycompany.com', description: 'Odoo login email' })
-  @IsOptional() @IsEmail() userEmail?: string;
+  @IsOptional() @IsString() userEmail?: string;
 
   @ApiProperty({ required: false, example: 'abc123xyz', description: 'API key for Freshdesk / Odoo' })
   @IsOptional() @IsString() apiKey?: string;
 
   @ApiProperty({ required: false, example: 'https://mycompany.bitrix24.com', description: 'Bitrix24 account URL' })
-  @IsOptional() @IsUrl() bitrixUrl?: string;
+  @IsOptional() @IsString() bitrixUrl?: string;
 
   @ApiProperty({ required: false, example: 'my_client_id', description: 'OAuth client ID (Bitrix24, Shopify)' })
   @IsOptional() @IsString() clientId?: string;
@@ -47,7 +47,7 @@ export class ConnectCredentialsDto {
   @IsOptional() @IsString() token?: string;
 
   @ApiProperty({ required: false, example: 'https://login.salesforce.com', description: 'Salesforce base URL' })
-  @IsOptional() @IsUrl() baseUrl?: string;
+  @IsOptional() @IsString() baseUrl?: string;
 }
 
 export class OAuthCallbackDto {
@@ -72,19 +72,19 @@ export class ConnectRequestDto {
   @IsOptional() @IsString() subdomain?: string;
 
   @ApiProperty({ required: false, example: 'https://myodoo.com' })
-  @IsOptional() @IsUrl() odooUrl?: string;
+  @IsOptional() @IsString() odooUrl?: string;
 
   @ApiProperty({ required: false, example: 'mydb' })
   @IsOptional() @IsString() databaseName?: string;
 
   @ApiProperty({ required: false, example: 'admin@mycompany.com' })
-  @IsOptional() @IsEmail() userEmail?: string;
+  @IsOptional() @IsString() userEmail?: string;
 
   @ApiProperty({ required: false, example: 'abc123xyz' })
   @IsOptional() @IsString() apiKey?: string;
 
   @ApiProperty({ required: false, example: 'https://mycompany.bitrix24.com' })
-  @IsOptional() @IsUrl() bitrixUrl?: string;
+  @IsOptional() @IsString() bitrixUrl?: string;
 
   @ApiProperty({ required: false, example: 'my_client_id' })
   @IsOptional() @IsString() clientId?: string;
@@ -102,7 +102,7 @@ export class ConnectRequestDto {
   @IsOptional() @IsString() token?: string;
 
   @ApiProperty({ required: false, example: 'https://login.salesforce.com' })
-  @IsOptional() @IsUrl() baseUrl?: string;
+  @IsOptional() @IsString() baseUrl?: string;
 }
 
 export class UserIdDto {
