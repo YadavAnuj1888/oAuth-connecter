@@ -7,6 +7,7 @@ import { RedisOAuthStateStore } from '../store/redis-oauth-state.store';
 import { EncryptionService }    from '../../../common/crypto/encryption.service';
 import { TokenRefreshQueue }    from '../queues/token-refresh.queue';
 import { getProviderConfig, OAuthProviderConfig } from '../providers/crm.providers';
+import { TenantService }        from './tenant.service';
 import { safeFetch }            from '../../../common/utils/safe-fetch';
 import { normalizeToken }       from '../../../common/utils/normalize-token';
 
@@ -20,6 +21,7 @@ export class OAuthService {
     private readonly stateStore:   RedisOAuthStateStore,
     private readonly encryption:   EncryptionService,
     private readonly refreshQueue: TokenRefreshQueue,
+    private readonly tenantSvc:    TenantService,
   ) {}
 
   /**
@@ -211,8 +213,10 @@ export class OAuthService {
     clientId?:    string;
     clientSecret?: string;
   }): Promise<IntegrationEntity> {
+    const tenant = await this.tenantSvc.getOrCreate(data.accountId);
+
     const existing = await this.repo.findOne({
-      where:  { accountId: data.accountId, provider: data.provider },
+      where:  { tenantId: tenant.id, accountId: data.accountId, provider: data.provider },
       select: ['id', 'refreshJobId'],
     });
 
@@ -242,7 +246,7 @@ export class OAuthService {
       await this.repo.update(existing.id, { ...patch, ...(refreshJobId ? { refreshJobId } : {}) });
       entity = await this.repo.findOneOrFail({ where: { id: existing.id, accountId: data.accountId } });
     } else {
-      entity = await this.repo.save(this.repo.create({ accountId: data.accountId, provider: data.provider, ...patch }));
+      entity = await this.repo.save(this.repo.create({ tenantId: tenant.id, accountId: data.accountId, provider: data.provider, ...patch }));
       if (entity.expiresAt && patch.refreshTokenEnc) {
         const refreshJobId = await this.refreshQueue.scheduleRefresh(entity.id, entity.expiresAt);
         await this.repo.update(entity.id, { refreshJobId });

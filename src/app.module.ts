@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import * as Joi          from 'joi';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { IntegrationEntity }  from './modules/integrations/entities/integration.entity';
+import { TenantEntity }       from './modules/integrations/entities/tenant.entity';
 
 @Module({
   imports: [
@@ -31,7 +32,7 @@ import { IntegrationEntity }  from './modules/integrations/entities/integration.
       username:    process.env.DB_USERNAME,
       password:    process.env.DB_PASSWORD,
       database:    process.env.DB_NAME,
-      entities:    [IntegrationEntity],
+      entities:    [IntegrationEntity, TenantEntity],
       synchronize: true,   // set false in prod, use migrations
       logging:     ['error'],
       extra:       { connectionLimit: 20 },
