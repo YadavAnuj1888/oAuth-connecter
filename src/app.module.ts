@@ -1,4 +1,3 @@
-// src/app.module.ts
 import { Module }        from '@nestjs/common';
 import { ConfigModule }  from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -33,7 +32,7 @@ import { TenantEntity }       from './modules/integrations/entities/tenant.entit
       password:    process.env.DB_PASSWORD,
       database:    process.env.DB_NAME,
       entities:    [IntegrationEntity, TenantEntity],
-      synchronize: true,   // set false in prod, use migrations
+      synchronize: true,
       logging:     ['error'],
       extra:       { connectionLimit: 20 },
     }),

@@ -24,10 +24,6 @@ export class OAuthService {
     private readonly tenantSvc:    TenantService,
   ) {}
 
-  /**
-   * Step 1: Generate OAuth auth URL.
-   * Tenant provides client_id, client_secret, redirect_uri — stored in Redis state.
-   */
   async getAuthUrl(
     provider: string,
     accountId: string,
@@ -43,7 +39,6 @@ export class OAuthService {
       return null;
     }
 
-    // Redirect URI: tenant can override, otherwise use backend callback
     const defaultRedirect = `${process.env.BASE_URL || 'http://localhost:3000'}/api/oauth/callback/${provider}`;
     const redirectUri = body.redirect_uri || defaultRedirect;
 
@@ -65,7 +60,6 @@ export class OAuthService {
       meta.subdomain = subdomain;
     }
 
-    // Store everything in Redis — 10 min TTL
     await this.stateStore.save(state, {
       provider, accountId, codeVerifier, createdAt: Date.now(),
       clientId, clientSecret, redirectUri,
@@ -92,9 +86,6 @@ export class OAuthService {
     return { authUrl: fullAuthUrl, state, provider };
   }
 
-  /**
-   * Step 2: Handle OAuth callback — exchange code for tokens using credentials from Redis state.
-   */
   async handleOAuthCallback(
     provider:  string,
     code:      string,
@@ -108,7 +99,6 @@ export class OAuthService {
     const stateData = await this.stateStore.verifyAndDelete(state, provider, accountId);
     if (!stateData) throw new UnauthorizedException('Invalid, expired, or tenant-mismatched OAuth state.');
 
-    // All credentials come from Redis state — stored by getAuthUrl()
     const { clientId, clientSecret, redirectUri } = stateData;
     if (!clientId || !clientSecret) throw new BadRequestException(`Missing OAuth credentials for ${provider}.`);
 
@@ -119,7 +109,6 @@ export class OAuthService {
     if (subdomain && config.dynamicAuthUrl) {
       tokenUrlOverride = config.tokenUrl.replace('{subdomain}', subdomain);
     }
-    // Zoho: use region-specific accounts-server for token exchange
     const accountsServer = query['accounts-server'];
     if (provider === 'zoho' && accountsServer) {
       tokenUrlOverride = `${accountsServer}/oauth/v2/token`;

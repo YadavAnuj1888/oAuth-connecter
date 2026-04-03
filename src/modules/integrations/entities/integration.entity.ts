@@ -13,7 +13,6 @@ export class IntegrationEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
-  // ─── Foreign key to tenants table ─────────────────────────
   @Column({ name: 'tenant_id' })
   tenantId: number;
 
@@ -21,7 +20,6 @@ export class IntegrationEntity {
   @JoinColumn({ name: 'tenant_id' })
   tenant: TenantEntity;
 
-  // ─── Denormalized for fast queries (matches tenant.account_id) ──
   @Column({ name: 'account_id', length: 100 })
   accountId: string;
 
@@ -31,7 +29,6 @@ export class IntegrationEntity {
   @Column({ name: 'api_domain', length: 500, nullable: true })
   apiDomain: string | null;
 
-  // ─── Encrypted secrets (never selected by default) ────────
   @Column({ name: 'access_token_enc', type: 'text', nullable: true, select: false })
   accessTokenEnc: string | null;
 
@@ -47,7 +44,6 @@ export class IntegrationEntity {
   @Column({ name: 'client_secret_enc', type: 'text', nullable: true, select: false })
   clientSecretEnc: string | null;
 
-  // ─── Token metadata ───────────────────────────────────────
   @Column({ name: 'token_type', length: 50, nullable: true })
   tokenType: string | null;
 
@@ -69,7 +65,6 @@ export class IntegrationEntity {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  // ─── Virtual (not in DB) — populated by decryptInPlace ────
   accessToken?:  string | null;
   refreshToken?: string | null;
   credentials?:  Record<string, any> | null;
