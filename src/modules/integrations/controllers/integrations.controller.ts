@@ -3,7 +3,7 @@ import {
   Param, Body, Query, Req,
   HttpCode, HttpStatus,
   UseGuards, ValidationPipe,
-  BadRequestException, UnauthorizedException,
+  BadRequestException, UnauthorizedException, Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
 import * as jwt    from 'jsonwebtoken';
@@ -43,6 +43,8 @@ const USER_ID_BODY = {
 @Controller('crm')
 @UseGuards(JwtAuthGuard)
 export class IntegrationsController {
+  private readonly logger = new Logger(IntegrationsController.name);
+
   constructor(
     private readonly oauthSvc:      OAuthService,
     private readonly tokenSvc:      TokenService,
@@ -90,6 +92,7 @@ export class IntegrationsController {
   ) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
     const p      = provider.toLowerCase();
+    this.logger.log(`Connect request: ${p}, accountId: ${req.accountId}`);
     const config = CRM_PROVIDERS[p];
     if (!config) throw new BadRequestException(`Provider "${p}" is not supported.`);
     if (config.authType === 'oauth') {
@@ -214,6 +217,8 @@ export class IntegrationsController {
 @ApiTags('CRM-Detail')
 @Controller('api')
 export class CallerdeskController {
+  private readonly logger = new Logger(CallerdeskController.name);
+
   constructor(
     private readonly tokenSvc: TokenService,
     private readonly oauthSvc: OAuthService,
@@ -289,7 +294,7 @@ export class CallerdeskController {
     if (!stateData) throw new BadRequestException('Invalid or expired state. Try connecting again.');
     const accountId = stateData.accountId || 'unknown';
 
-    console.log(`OAuth callback for ${p}, accountId: ${accountId}`);
+    this.logger.log(`OAuth callback for ${p}, accountId: ${accountId}`);
 
     const entity = await this.oauthSvc.handleOAuthCallback(p, code, state, accountId, rest);
     return {
@@ -414,10 +419,10 @@ export class CallerdeskController {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     try {
       const entity = await this.oauthSvc.handleOAuthCallback(provider.toLowerCase(), code, state, accountId, rest);
-      console.log(`${provider} connected for accountId: ${entity.accountId} — tokens stored in DB`);
+      this.logger.log(`${provider} connected for accountId: ${entity.accountId} — tokens stored in DB`);
       return `<html><body><h2>&#x2705; ${provider} connected!</h2><p>Account: ${entity.accountId}</p><p>Tokens stored. Redirecting...</p><script>setTimeout(function(){ window.location.href="${frontendUrl}?provider=${provider}&connected=true&accountId=${entity.accountId}"; }, 1500);</script></body></html>`;
     } catch (err: any) {
-      console.error(`OAuth callback failed for ${provider}:`, err.message);
+      this.logger.error(`OAuth callback failed for ${provider}: ${err.message}`);
       return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>${err.message}</p><script>setTimeout(function(){ window.location.href="${frontendUrl}?provider=${provider}&connected=false&error=${encodeURIComponent(err.message)}"; }, 3000);</script></body></html>`;
     }
   }

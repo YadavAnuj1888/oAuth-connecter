@@ -1,10 +1,11 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { CrmVerifier, ICrmVerifier } from './verifier.registry';
 import { VerifyResult } from '../interfaces/crm-adapter.interface';
 import { safeFetch } from '../../../common/utils/safe-fetch';
 
 @CrmVerifier('bitrix24')
 export class Bitrix24Verifier implements ICrmVerifier {
+  private readonly logger = new Logger(Bitrix24Verifier.name);
   async verify(body: Record<string, any>): Promise<VerifyResult> {
     let { bitrixUrl, clientId, clientSecret } = body;
     if (bitrixUrl && !bitrixUrl.startsWith('http')) bitrixUrl = `https://${bitrixUrl}`;
@@ -16,7 +17,7 @@ export class Bitrix24Verifier implements ICrmVerifier {
         return { userId: String(data.result.ID ?? data.result.id ?? clientId),
                  accessToken: clientSecret, tokenType: 'webhook', apiDomain: bitrixUrl };
       }
-    } catch (e) { console.warn('[Bitrix24] outbound webhook verify failed:', e); }
+    } catch (e) { this.logger.warn(`Outbound webhook verify failed: ${e}`); }
 
     try {
       const res  = await safeFetch(`${bitrixUrl}/rest/1/${clientSecret}/profile.json`, { timeoutMs: 8000, retries: 1 });
@@ -25,7 +26,7 @@ export class Bitrix24Verifier implements ICrmVerifier {
         return { userId: String(data.result.ID ?? data.result.id ?? '1'),
                  accessToken: clientSecret, tokenType: 'inbound_webhook', apiDomain: bitrixUrl };
       }
-    } catch (e) { console.warn('[Bitrix24] inbound webhook verify failed:', e); }
+    } catch (e) { this.logger.warn(`Inbound webhook verify failed: ${e}`); }
 
     const redirectUri = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/api/oauth/callback/bitrix24`;
     const authUrl     = `${bitrixUrl}/oauth/authorize/?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}`;

@@ -1,9 +1,12 @@
+import { Logger } from '@nestjs/common';
 import { CrmVerifier, ICrmVerifier } from './verifier.registry';
 import { VerifyResult } from '../interfaces/crm-adapter.interface';
 import { safeFetch } from '../../../common/utils/safe-fetch';
 
 @CrmVerifier('odoo')
 export class OdooVerifier implements ICrmVerifier {
+  private readonly logger = new Logger(OdooVerifier.name);
+
   async verify(body: Record<string, any>): Promise<VerifyResult> {
     const { odooUrl, databaseName, userEmail, apiKey } = body;
 
@@ -21,7 +24,7 @@ export class OdooVerifier implements ICrmVerifier {
         return { userId: String(data.result.uid), accessToken: sessionMatch?.[1] || apiKey,
                  tokenType: 'session', email: userEmail, apiDomain: odooUrl };
       }
-    } catch (e) { console.warn('[Odoo] JSON-RPC verify failed:', e); }
+    } catch (e) { this.logger.warn(`JSON-RPC verify failed: ${e}`); }
 
     try {
       const escXml = (s: string) =>
@@ -44,7 +47,7 @@ export class OdooVerifier implements ICrmVerifier {
         return { userId: match[1], accessToken: apiKey, tokenType: 'api_key',
                  email: userEmail, apiDomain: odooUrl };
       }
-    } catch (e) { console.warn('[Odoo] XML-RPC verify failed:', e); }
+    } catch (e) { this.logger.warn(`XML-RPC verify failed: ${e}`); }
 
     return { userId: userEmail, accessToken: apiKey, tokenType: 'api_key',
              email: userEmail, apiDomain: odooUrl };

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, UnauthorizedException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { IntegrationEntity } from '../entities/integration.entity';
@@ -11,6 +11,8 @@ import { normalizeToken }    from '../../../common/utils/normalize-token';
 
 @Injectable()
 export class TokenService {
+  private readonly logger = new Logger(TokenService.name);
+
   constructor(
     @InjectRepository(IntegrationEntity)
     private readonly repo:         Repository<IntegrationEntity>,
@@ -22,6 +24,7 @@ export class TokenService {
   async getValidToken(accountId: string, provider: string): Promise<IntegrationEntity> {
     const entity = await this.findActiveWithTokens(accountId, provider);
     if (entity.isTokenExpiringSoon(5) && entity.refreshTokenEnc) {
+      this.logger.log(`Token expiring soon — auto-refreshing: ${provider}, accountId: ${accountId}`);
       return this.refreshToken(accountId, provider, entity);
     }
     return this.oauthSvc.decryptInPlace(entity);
@@ -48,8 +51,10 @@ export class TokenService {
 
     const lockAcquired = await this.oauthSvc.acquireRefreshLock(entity.id);
     if (!lockAcquired) {
+      this.logger.warn(`Refresh lock not acquired for ${provider} — another refresh in progress`);
       return this.oauthSvc.decryptInPlace(entity);
     }
+    this.logger.log(`Refreshing token: ${provider}, accountId: ${accountId}`);
 
     try {
       const refreshToken = this.encryption.decrypt(entity.refreshTokenEnc!);
@@ -93,9 +98,11 @@ export class TokenService {
       if (!res.ok) {
         const errorBody = await res.text();
         if (res.status === 401 || res.status === 400) {
+          this.logger.warn(`Refresh token revoked: ${provider}, accountId: ${accountId} — marking inactive`);
           await this.repo.update(entity.id, { isActive: false });
           throw new UnauthorizedException(`Refresh token revoked for ${provider}. Please reconnect.`);
         }
+        this.logger.error(`Token refresh failed: ${provider}, status: ${res.status}, body: ${errorBody}`);
         throw new BadRequestException(`Token refresh failed for ${provider}: ${errorBody}`);
       }
 
@@ -119,6 +126,7 @@ export class TokenService {
       await this.repo.update(entity.id, finalPatch);
 
       Object.assign(entity, finalPatch);
+      this.logger.log(`Token refreshed successfully: ${provider}, accountId: ${accountId}`);
       return this.oauthSvc.decryptInPlace(entity);
 
     } finally {
@@ -128,6 +136,7 @@ export class TokenService {
 
   async disconnect(accountId: string, provider: string): Promise<void> {
     const entity = await this.findActive(accountId, provider);
+    this.logger.log(`Disconnecting ${provider} for accountId: ${accountId}`);
     if (entity.refreshJobId) await this.refreshQueue.cancelJob(entity.refreshJobId);
     await this.repo.update(entity.id, {
       isActive: false, accessTokenEnc: null,

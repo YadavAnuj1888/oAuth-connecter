@@ -1,5 +1,8 @@
+import { Logger } from '@nestjs/common';
 import { safeFetch } from '../../../common/utils/safe-fetch';
 import { VerifyResult } from '../interfaces/crm-adapter.interface';
+
+const logger = new Logger('ExampleCrmAdapter');
 
 export async function verifyExampleCrm(body: Record<string, any>): Promise<VerifyResult> {
   const { apiKey, subdomain } = body;
@@ -22,7 +25,7 @@ export async function verifyExampleCrm(body: Record<string, any>): Promise<Verif
       };
     }
   } catch (e) {
-    console.warn('[ExampleCRM] live verify failed — storing credentials anyway:', e);
+    logger.warn(`Live verify failed — storing credentials anyway: ${e}`);
   }
 
   return {

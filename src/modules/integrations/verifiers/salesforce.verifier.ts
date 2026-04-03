@@ -1,9 +1,12 @@
+import { Logger } from '@nestjs/common';
 import { CrmVerifier, ICrmVerifier } from './verifier.registry';
 import { VerifyResult } from '../interfaces/crm-adapter.interface';
 import { safeFetch } from '../../../common/utils/safe-fetch';
 
 @CrmVerifier('salesforce')
 export class SalesforceVerifier implements ICrmVerifier {
+  private readonly logger = new Logger(SalesforceVerifier.name);
+
   async verify(body: Record<string, any>): Promise<VerifyResult> {
     const { clientId, clientSecret, baseUrl, subDomain, token } = body;
     const sfBase = baseUrl || 'https://login.salesforce.com';
@@ -18,7 +21,7 @@ export class SalesforceVerifier implements ICrmVerifier {
           return { userId: data.user_id, accessToken: token, tokenType: 'bearer',
                    apiDomain: subDomain || sfBase };
         }
-      } catch (e) { console.warn('[Salesforce] token verify failed:', e); }
+      } catch (e) { this.logger.warn(`Token verify failed: ${e}`); }
     }
 
     try {
@@ -35,7 +38,7 @@ export class SalesforceVerifier implements ICrmVerifier {
                  accessToken: data.access_token, tokenType: data.token_type || 'bearer',
                  apiDomain: subDomain || sfBase };
       }
-    } catch (e) { console.warn('[Salesforce] client_credentials failed:', e); }
+    } catch (e) { this.logger.warn(`Client credentials failed: ${e}`); }
 
     return { userId: clientId, accessToken: token || null, tokenType: 'bearer',
              apiDomain: subDomain || sfBase };

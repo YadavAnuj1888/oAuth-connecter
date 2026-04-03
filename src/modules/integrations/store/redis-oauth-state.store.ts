@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, Logger } from '@nestjs/common';
 import { createClient, RedisClientType } from 'redis';
 
 export interface OAuthState {
@@ -19,11 +19,12 @@ const LOCK_TTL_SECS = 30;
 
 @Injectable()
 export class RedisOAuthStateStore implements OnModuleDestroy {
+  private readonly logger = new Logger(RedisOAuthStateStore.name);
   private client: RedisClientType;
 
   constructor() {
     this.client = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' }) as RedisClientType;
-    this.client.connect().catch((e) => console.error('[Redis] connect error:', e));
+    this.client.connect().catch((e) => this.logger.error(`Connect error: ${e}`));
   }
 
   async onModuleDestroy() { await this.client.quit(); }

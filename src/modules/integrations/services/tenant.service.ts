@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TenantEntity } from '../entities/tenant.entity';
 
 @Injectable()
 export class TenantService {
+  private readonly logger = new Logger(TenantService.name);
+
   constructor(
     @InjectRepository(TenantEntity)
     private readonly repo: Repository<TenantEntity>,
@@ -14,6 +16,7 @@ export class TenantService {
     let tenant = await this.repo.findOne({ where: { accountId } });
     if (!tenant) {
       tenant = await this.repo.save(this.repo.create({ accountId, isActive: true }));
+      this.logger.log(`New tenant created: ${accountId}`);
     }
     return tenant;
   }

@@ -2,7 +2,7 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as express from 'express';
 import * as multer from 'multer';
@@ -38,9 +38,10 @@ async function bootstrap() {
     swaggerOptions: { persistAuthorization: true },
   });
 
+  const logger = new Logger('Bootstrap');
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`\n running on http://localhost:${port}`);
-  console.log(`📖 Swagger docs:         http://localhost:${port}/docs`);
+  logger.log(`Server running on http://localhost:${port}`);
+  logger.log(`Swagger docs: http://localhost:${port}/docs`);
 }
 bootstrap();

@@ -1,11 +1,13 @@
 import * as crypto from 'crypto';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { CrmVerifier, ICrmVerifier } from './verifier.registry';
 import { VerifyResult } from '../interfaces/crm-adapter.interface';
 import { safeFetch } from '../../../common/utils/safe-fetch';
 
 @CrmVerifier('shopify')
 export class ShopifyVerifier implements ICrmVerifier {
+  private readonly logger = new Logger(ShopifyVerifier.name);
+
   async verify(body: Record<string, any>): Promise<VerifyResult> {
     const { subDomain, clientId, token } = body;
 
@@ -19,7 +21,7 @@ export class ShopifyVerifier implements ICrmVerifier {
           return { userId: String(data.shop.id), accessToken: token,
                    tokenType: 'access_token', apiDomain: subDomain };
         }
-      } catch (e) { console.warn('[Shopify] token verify failed:', e); }
+      } catch (e) { this.logger.warn(`Token verify failed: ${e}`); }
     }
 
     const nonce       = crypto.randomBytes(16).toString('hex');

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { OAuthService } from './oauth.service';
 import { getProviderConfig, CredentialProviderConfig } from '../providers/crm.providers';
 import { IntegrationEntity } from '../entities/integration.entity';
@@ -8,6 +8,8 @@ import '../verifiers';
 
 @Injectable()
 export class CredentialService {
+  private readonly logger = new Logger(CredentialService.name);
+
   constructor(private readonly oauthSvc: OAuthService) {}
 
   async connect(
@@ -22,8 +24,10 @@ export class CredentialService {
 
     const missing = config.requiredFields.filter((field) => !body[field]);
     if (missing.length > 0) {
+      this.logger.warn(`Missing fields for ${provider}: ${missing.join(', ')}`);
       throw new BadRequestException(`Missing fields for ${provider}: ${missing.join(', ')}`);
     }
+    this.logger.log(`Connecting ${provider} for accountId: ${accountId}`);
 
     const verifier = getVerifier(provider);
     const result: VerifyResult = verifier
