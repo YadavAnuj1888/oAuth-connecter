@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException, NotFoundException, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,6 +12,8 @@ import { normalizeToken }       from '../../../common/utils/normalize-token';
 
 @Injectable()
 export class OAuthService {
+  private readonly logger = new Logger(OAuthService.name);
+
   constructor(
     @InjectRepository(IntegrationEntity)
     private readonly repo:         Repository<IntegrationEntity>,
@@ -24,12 +26,16 @@ export class OAuthService {
     provider: string,
     accountId: string,
     body: Record<string, any> = {},
-  ): Promise<Record<string, string>> {
+  ): Promise<Record<string, string> | null> {
     const config = getProviderConfig(provider) as OAuthProviderConfig;
     if (config.authType !== 'oauth') throw new BadRequestException(`${provider} does not use OAuth.`);
 
-    const clientId = body.client_id || process.env[`${provider.toUpperCase()}_CLIENT_ID`];
-    if (!clientId) throw new BadRequestException(`Missing client_id for ${provider}. Set ${provider.toUpperCase()}_CLIENT_ID in .env`);
+    const clientId     = body.client_id     || process.env[`${provider.toUpperCase()}_CLIENT_ID`];
+    const clientSecret = body.client_secret || process.env[`${provider.toUpperCase()}_CLIENT_SECRET`];
+    if (!clientId || !clientSecret) {
+      this.logger.warn(`Missing OAuth config for provider: ${provider}`);
+      return null;
+    }
 
     const redirectUri = body.redirect_uri || config.redirectUrl;
     const state       = crypto.randomBytes(32).toString('hex');
@@ -52,6 +58,7 @@ export class OAuthService {
 
     await this.stateStore.save(state, {
       provider, accountId, codeVerifier, createdAt: Date.now(),
+      clientId, clientSecret,
       ...(Object.keys(meta).length ? { meta } : {}),
     });
 
@@ -70,7 +77,9 @@ export class OAuthService {
     if (provider === 'pipedrive') { delete params.scope; delete params.access_type; }
     if (codeChallenge)            { params.code_challenge = codeChallenge; params.code_challenge_method = 'S256'; }
 
-    return { authUrl: `${authUrl}?${new URLSearchParams(params)}`, state, provider };
+    const fullAuthUrl = `${authUrl}?${new URLSearchParams(params)}`;
+    this.logger.log(`Auth URL generated for provider: ${provider}, accountId: ${accountId}`);
+    return { authUrl: fullAuthUrl, state, provider };
   }
 
   async handleOAuthCallback(
@@ -86,8 +95,8 @@ export class OAuthService {
     const stateData = await this.stateStore.verifyAndDelete(state, provider, accountId);
     if (!stateData) throw new UnauthorizedException('Invalid, expired, or tenant-mismatched OAuth state.');
 
-    const clientId     = process.env[`${provider.toUpperCase()}_CLIENT_ID`]!;
-    const clientSecret = process.env[`${provider.toUpperCase()}_CLIENT_SECRET`]!;
+    const clientId     = stateData.clientId     || process.env[`${provider.toUpperCase()}_CLIENT_ID`];
+    const clientSecret = stateData.clientSecret || process.env[`${provider.toUpperCase()}_CLIENT_SECRET`];
     if (!clientId || !clientSecret) throw new BadRequestException(`Missing OAuth credentials for ${provider}.`);
 
     const subdomain = stateData.meta?.subdomain;

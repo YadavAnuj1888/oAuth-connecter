@@ -6,7 +6,8 @@ import { safeFetch } from '../../../common/utils/safe-fetch';
 @CrmVerifier('bitrix24')
 export class Bitrix24Verifier implements ICrmVerifier {
   async verify(body: Record<string, any>): Promise<VerifyResult> {
-    const { bitrixUrl, clientId, clientSecret } = body;
+    let { bitrixUrl, clientId, clientSecret } = body;
+    if (bitrixUrl && !bitrixUrl.startsWith('http')) bitrixUrl = `https://${bitrixUrl}`;
 
     try {
       const res  = await safeFetch(`${bitrixUrl}/rest/profile.json?auth=${clientSecret}`, { timeoutMs: 8000, retries: 1 });

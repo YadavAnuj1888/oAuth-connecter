@@ -6,6 +6,8 @@ export interface OAuthState {
   accountId:    string;
   codeVerifier: string | null;
   createdAt:    number;
+  clientId?:    string;
+  clientSecret?: string;
   meta?:        Record<string, string>;
 }
 

@@ -8,7 +8,7 @@ import {
 import { Request } from 'express';
 import * as jwt    from 'jsonwebtoken';
 import {
-  ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody,
+  ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiQuery,
   ApiBearerAuth, ApiConsumes,
 } from '@nestjs/swagger';
 import { JwtAuthGuard }      from '../../../common/guards/jwt-auth.guard';
@@ -92,7 +92,11 @@ export class IntegrationsController {
     const p      = provider.toLowerCase();
     const config = CRM_PROVIDERS[p];
     if (!config) throw new BadRequestException(`Provider "${p}" is not supported.`);
-    if (config.authType === 'oauth') return this.oauthSvc.getAuthUrl(p, req.accountId, body);
+    if (config.authType === 'oauth') {
+      const result = await this.oauthSvc.getAuthUrl(p, req.accountId, body);
+      if (!result) throw new BadRequestException(`Missing OAuth config for provider: ${p}`);
+      return result;
+    }
     return this.credentialSvc.connect(p, req.accountId, body);
   }
 
@@ -219,6 +223,38 @@ export class CallerdeskController {
     const userId = String(body?.user_id || body?.accountId || body?.account_id || '').trim();
     if (!userId) throw new BadRequestException('Missing user_id');
     return this.tokenSvc.getDetail(userId, provider);
+  }
+
+  @Get('crm/:provider/auth')
+  @ApiOperation({ summary: 'Get OAuth auth URL for a provider' })
+  @ApiParam(PROVIDER_PARAM)
+  @ApiQuery({ name: 'account_id',    required: true,  description: 'Your tenant / account ID',               example: '97106'      })
+  @ApiQuery({ name: 'client_id',     required: true,  description: 'OAuth client ID from the CRM app',       example: '1000.XXXXX' })
+  @ApiQuery({ name: 'client_secret', required: true,  description: 'OAuth client secret from the CRM app',   example: 'abc123'     })
+  @ApiResponse({ status: 200, description: 'Returns OAuth redirect URL', schema: { type: 'object', properties: { authUrl: { type: 'string' } } } })
+  @ApiResponse({ status: 400, description: 'Provider not supported or missing OAuth config' })
+  async getAuthUrl(
+    @Param('provider') provider: string,
+    @Query('account_id') accountId: string,
+    @Query('client_id') clientId: string,
+    @Query('client_secret') clientSecret: string,
+  ) {
+    const p = provider.toLowerCase();
+    console.log('Auth URL requested for:', p);
+    if (!CRM_PROVIDERS[p]) throw new BadRequestException(`Provider "${p}" is not supported.`);
+    const config = CRM_PROVIDERS[p];
+    if (config.authType !== 'oauth') throw new BadRequestException(`Provider "${p}" does not use OAuth.`);
+    try {
+      const result = await this.oauthSvc.getAuthUrl(p, accountId || 'anonymous', { client_id: clientId, client_secret: clientSecret });
+      if (!result) {
+        console.warn('Missing OAuth config:', p);
+        return { success: false, message: 'OAuth config missing. Provide client_id and client_secret.' };
+      }
+      return { authUrl: result.authUrl };
+    } catch {
+      console.warn('Missing OAuth config:', p);
+      return { success: false, message: 'OAuth config missing' };
+    }
   }
 
   @Post('crm/hubspot/detail')
