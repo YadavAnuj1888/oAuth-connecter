@@ -40,11 +40,11 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     tokenUrl:   'https://accounts.zoho.com/oauth/v2/token',
     refreshUrl: 'https://accounts.zoho.com/oauth/v2/token',
     apiDomain: 'https://www.zohoapis.com/crm/v3/', scopeSeparator: ',',
-    redirectUrl: process.env.ZOHO_REDIRECT_URL || 'https://app.callerdesk.io/admin/zohodesk-data',
-    scopes: ['ZohoCRM.modules.ALL','ZohoCRM.settings.ALL','ZohoCRM.users.READ','Desk.contacts.ALL','Desk.tickets.ALL','Desk.basic.READ','Desk.settings.ALL'],
+    redirectUrl: process.env.ZOHO_REDIRECT_URL || 'https://app.callerdesk.io/admin/zoho-data',
+    scopes: ['PhoneBridge.call.log','PhoneBridge.zohoone.search'],
     promptConsent: true,
     userIdPath: 'user_id',
-    metadata: { displayName: 'Zoho CRM & Desk', logo: 'https://cdn.simpleicons.org/zoho/E42527', color: '#E42527' },
+    metadata: { displayName: 'Zoho', logo: 'https://cdn.simpleicons.org/zoho/E42527', color: '#E42527' },
   },
 
   hubspot: {

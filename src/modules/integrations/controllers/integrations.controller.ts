@@ -251,11 +251,17 @@ export class CallerdeskController {
     const config = CRM_PROVIDERS[p];
     if (config.authType !== 'oauth') throw new BadRequestException(`Provider "${p}" does not use OAuth.`);
     if (!accountId) throw new BadRequestException('account_id is required.');
-    if (!clientId || !clientSecret) throw new BadRequestException('client_id and client_secret are required.');
+
+    // Fall back to env vars when client_id / client_secret not in query
+    const resolvedClientId     = clientId     || process.env[`${p.toUpperCase()}_CLIENT_ID`];
+    const resolvedClientSecret = clientSecret || process.env[`${p.toUpperCase()}_CLIENT_SECRET`];
+    if (!resolvedClientId || !resolvedClientSecret) {
+      throw new BadRequestException('client_id and client_secret are required (pass in query or set env vars).');
+    }
 
     const result = await this.oauthSvc.getAuthUrl(p, accountId, {
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: resolvedClientId,
+      client_secret: resolvedClientSecret,
       ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     });
     if (!result) return { success: false, message: 'Failed to generate auth URL.' };
@@ -416,14 +422,14 @@ export class CallerdeskController {
     const { code, state, ...rest } = query;
     const stateData = await this.oauthSvc['stateStore'].get(state);
     const accountId = stateData?.accountId || 'unknown';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const panelUrl = process.env.FRONTEND_URL || 'https://app.callerdesk.io/admin/';
     try {
       const entity = await this.oauthSvc.handleOAuthCallback(provider.toLowerCase(), code, state, accountId, rest);
       this.logger.log(`${provider} connected for accountId: ${entity.accountId} — tokens stored in DB`);
-      return `<html><body><h2>&#x2705; ${provider} connected!</h2><p>Account: ${entity.accountId}</p><p>Tokens stored. Redirecting...</p><script>setTimeout(function(){ window.location.href="${frontendUrl}?provider=${provider}&connected=true&accountId=${entity.accountId}"; }, 1500);</script></body></html>`;
+      return `<html><body><h2>&#x2705; ${provider} connected!</h2><p>Account: ${entity.accountId}</p><p>Tokens stored. Redirecting...</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=true&accountId=${entity.accountId}"; }, 1500);</script></body></html>`;
     } catch (err: any) {
       this.logger.error(`OAuth callback failed for ${provider}: ${err.message}`);
-      return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>${err.message}</p><script>setTimeout(function(){ window.location.href="${frontendUrl}?provider=${provider}&connected=false&error=${encodeURIComponent(err.message)}"; }, 3000);</script></body></html>`;
+      return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>${err.message}</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=false&error=${encodeURIComponent(err.message)}"; }, 3000);</script></body></html>`;
     }
   }
 }
