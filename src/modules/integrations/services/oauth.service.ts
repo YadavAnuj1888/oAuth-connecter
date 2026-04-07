@@ -42,6 +42,16 @@ export class OAuthService {
     const defaultRedirect = `${process.env.BASE_URL || 'http://localhost:3000'}/api/oauth/callback/${provider}`;
     const redirectUri = body.redirect_uri || defaultRedirect;
 
+
+
+    if (!this.isAllowedRedirect(redirectUri)) {
+      throw new BadRequestException(`redirect_uri "${redirectUri}" is not in the allowlist.`);
+    }
+
+
+    this.logger.log(`OAuth start — provider=${provider} accountId=${accountId} ` +
+                    `clientId=${this.encryption.mask(clientId)} redirect=${redirectUri}`);
+
     const state = crypto.randomBytes(32).toString('hex');
 
     let codeVerifier:  string | null = null;
@@ -58,6 +68,13 @@ export class OAuthService {
       if (!subdomain) throw new BadRequestException(`${provider} requires subdomain.`);
       authUrl = authUrl.replace('{subdomain}', subdomain);
       meta.subdomain = subdomain;
+    }
+
+
+    if (config.dynamicRegion) {
+      const region = body.region || 'com';
+      authUrl = authUrl.replace('{region}', region);
+      meta.region = region;
     }
 
     await this.stateStore.save(state, {
@@ -109,10 +126,13 @@ export class OAuthService {
     if (subdomain && config.dynamicAuthUrl) {
       tokenUrlOverride = config.tokenUrl.replace('{subdomain}', subdomain);
     }
-    const accountsServer = query['accounts-server'];
-    if (provider === 'zoho' && accountsServer) {
-      tokenUrlOverride = `${accountsServer}/oauth/v2/token`;
-      this.logger.log(`Zoho region detected: ${accountsServer}`);
+
+
+    let region: string | null = stateData.meta?.region || null;
+    if (config.dynamicRegion) {
+      region = this.extractZohoRegion(query) || region || 'com';
+      tokenUrlOverride = config.tokenUrl.replace('{region}', region);
+      this.logger.log(`${provider} region resolved: ${region}`);
     }
 
     const rawToken = await this.exchangeCodeForToken({
@@ -124,7 +144,10 @@ export class OAuthService {
     const normalized = normalizeToken(rawToken);
     if (!normalized.accessToken) throw new BadRequestException('Token exchange returned no access_token.');
 
-    const apiDomain = rawToken.instance_url || this.resolveApiDomain(config, query, subdomain);
+    let apiDomain = rawToken.instance_url || this.resolveApiDomain(config, query, subdomain);
+    if (region && apiDomain.includes('{region}')) {
+      apiDomain = apiDomain.replace('{region}', region);
+    }
 
     this.logger.log(`Tokens received — provider: ${provider}, accountId: ${accountId}, storing in DB`);
 
@@ -136,6 +159,7 @@ export class OAuthService {
       expiresAt:    normalized.expiresAt,
       clientId,
       clientSecret,
+      region,
     });
   }
 
@@ -201,6 +225,7 @@ export class OAuthService {
     credentials?: Record<string, any> | null;
     clientId?:    string;
     clientSecret?: string;
+    region?:      string | null;
   }): Promise<IntegrationEntity> {
     const tenant = await this.tenantSvc.getOrCreate(data.accountId);
 
@@ -214,6 +239,7 @@ export class OAuthService {
       tokenType:        data.tokenType,
       expiresAt:        data.expiresAt,
       email:            data.email      ?? null,
+      region:           data.region     ?? null,
       isActive:         true,
       accessTokenEnc:   this.encryption.encrypt(data.accessToken),
       refreshTokenEnc:  data.refreshToken ? this.encryption.encrypt(data.refreshToken) : null,
@@ -274,6 +300,26 @@ export class OAuthService {
 
   async releaseRefreshLock(integrationId: number): Promise<void> {
     return this.stateStore.releaseRefreshLock(integrationId);
+  }
+
+
+  private isAllowedRedirect(uri: string): boolean {
+    try {
+      const u = new URL(uri);
+      const allowed = (process.env.ALLOWED_REDIRECT_HOSTS || 'app.callerdesk.io,localhost,127.0.0.1')
+        .split(',').map((s) => s.trim()).filter(Boolean);
+      return allowed.some((host) => u.hostname === host || u.hostname.endsWith(`.${host}`));
+    } catch {
+      return false;
+    }
+  }
+
+
+
+  private extractZohoRegion(query: Record<string, string>): string {
+    const server = query['accounts-server'] || '';
+    const m = server.match(/accounts\.zoho\.([a-z.]+)/i);
+    return m ? m[1] : 'com';
   }
 
   private resolveApiDomain(

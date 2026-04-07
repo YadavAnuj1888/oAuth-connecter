@@ -59,6 +59,10 @@ export class IntegrationEntity {
   @Column({ name: 'refresh_job_id', length: 200, nullable: true })
   refreshJobId: string | null;
 
+
+  @Column({ name: 'region', length: 10, nullable: true })
+  region: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

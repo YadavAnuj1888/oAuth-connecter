@@ -16,6 +16,18 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
     try {
       const res = await fetch(url, { ...fetchOpts, signal: controller.signal });
       clearTimeout(timer);
+
+
+      if (res.status === 429 && attempt < retries) {
+        const retryAfter = parseInt(res.headers.get('retry-after') || '0', 10);
+        const wait = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt, 30_000);
+        await sleep(wait);
+        continue;
+      }
+
+      if (res.status >= 400 && res.status < 500 && res.status !== 408) {
+        return res;
+      }
       if (res.status >= 500 && attempt < retries) {
         await sleep(retryDelayMs * Math.pow(2, attempt));
         continue;

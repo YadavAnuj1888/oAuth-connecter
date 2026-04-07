@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'crypto';
 
-const ALG    = 'aes-256-gcm';
-const IV_LEN = 16;
+const ALG     = 'aes-256-gcm';
+const IV_LEN  = 16;
+const VERSION = 'v1';
 
 @Injectable()
 export class EncryptionService {
@@ -16,16 +17,19 @@ export class EncryptionService {
 
   encrypt(plain: string): string {
     if (!plain) return plain;
-    const iv       = crypto.randomBytes(IV_LEN);
-    const cipher   = crypto.createCipheriv(ALG, this.key, iv);
-    const enc      = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-    const tag      = cipher.getAuthTag();
-    return `${iv.toString('hex')}:${tag.toString('hex')}:${enc.toString('hex')}`;
+    const iv     = crypto.randomBytes(IV_LEN);
+    const cipher = crypto.createCipheriv(ALG, this.key, iv);
+    const enc    = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+    const tag    = cipher.getAuthTag();
+
+    return `${VERSION}:${iv.toString('hex')}:${tag.toString('hex')}:${enc.toString('hex')}`;
   }
 
   decrypt(stored: string): string {
     if (!stored || !stored.includes(':')) return stored;
-    const [ivHex, tagHex, ctHex] = stored.split(':');
+    const parts = stored.split(':');
+
+    const [ivHex, tagHex, ctHex] = parts.length === 4 ? parts.slice(1) : parts;
     const iv  = Buffer.from(ivHex, 'hex');
     const tag = Buffer.from(tagHex, 'hex');
     const ct  = Buffer.from(ctHex, 'hex');

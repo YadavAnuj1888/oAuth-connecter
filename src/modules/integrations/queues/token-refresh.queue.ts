@@ -23,9 +23,19 @@ export class TokenRefreshQueue implements OnModuleDestroy {
   async onModuleDestroy() { await this.queue.close(); }
 
   async scheduleRefresh(integrationId: number, expiresAt: Date): Promise<string> {
-    const delay = Math.max(expiresAt.getTime() - Date.now() - 5 * 60 * 1000, 0);
-    const jobId = `refresh:${integrationId}:${Date.now()}`;
-    await this.queue.add('refresh-token', { integrationId }, { jobId, delay });
+
+    const REFRESH_BUFFER_MS = 10 * 60 * 1000;
+    const delay = Math.max(expiresAt.getTime() - Date.now() - REFRESH_BUFFER_MS, 0);
+
+
+    const jobId = `refresh:${integrationId}`;
+    await this.queue.remove(jobId).catch(() => {});
+    await this.queue.add('refresh-token', { integrationId }, {
+      jobId,
+      delay,
+      attempts: 5,
+      backoff:  { type: 'exponential', delay: 60_000 },
+    });
     return jobId;
   }
 

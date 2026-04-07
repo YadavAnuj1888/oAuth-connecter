@@ -15,7 +15,7 @@ export interface OAuthState {
 const TTL           = 600;
 const PREFIX        = 'oauth:state:';
 const LOCK_PREFIX   = 'refresh:lock:';
-const LOCK_TTL_SECS = 30;
+const LOCK_TTL_SECS = 60;
 
 @Injectable()
 export class RedisOAuthStateStore implements OnModuleDestroy {
@@ -69,5 +69,10 @@ export class RedisOAuthStateStore implements OnModuleDestroy {
 
   async releaseRefreshLock(integrationId: number): Promise<void> {
     await this.client.del(`${LOCK_PREFIX}${integrationId}`);
+  }
+
+
+  async renewRefreshLock(integrationId: number): Promise<void> {
+    await this.client.expire(`${LOCK_PREFIX}${integrationId}`, LOCK_TTL_SECS);
   }
 }

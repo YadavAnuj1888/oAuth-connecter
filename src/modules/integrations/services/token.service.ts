@@ -23,11 +23,21 @@ export class TokenService {
 
   async getValidToken(accountId: string, provider: string): Promise<IntegrationEntity> {
     const entity = await this.findActiveWithTokens(accountId, provider);
-    if (entity.isTokenExpiringSoon(5) && entity.refreshTokenEnc) {
+
+    if (entity.isTokenExpiringSoon(10) && entity.refreshTokenEnc) {
       this.logger.log(`Token expiring soon — auto-refreshing: ${provider}, accountId: ${accountId}`);
       return this.refreshToken(accountId, provider, entity);
     }
     return this.oauthSvc.decryptInPlace(entity);
+  }
+
+
+  async getValidAccessToken(accountId: string, provider: string): Promise<string> {
+    const entity = await this.getValidToken(accountId, provider);
+    if (!entity.accessToken) {
+      throw new UnauthorizedException(`No access token available for ${provider}. Reconnect required.`);
+    }
+    return entity.accessToken;
   }
 
   async refreshToken(
@@ -51,12 +61,24 @@ export class TokenService {
 
     const lockAcquired = await this.oauthSvc.acquireRefreshLock(entity.id);
     if (!lockAcquired) {
-      this.logger.warn(`Refresh lock not acquired for ${provider} — another refresh in progress`);
-      return this.oauthSvc.decryptInPlace(entity);
+
+
+      this.logger.warn(`Refresh lock busy — waiting for in-flight refresh: ${provider}/${accountId}`);
+      await new Promise((r) => setTimeout(r, 1500));
+      const fresh = await this.findActiveWithTokens(accountId, provider);
+      return this.oauthSvc.decryptInPlace(fresh);
     }
     this.logger.log(`Refreshing token: ${provider}, accountId: ${accountId}`);
 
     try {
+
+      const latest = await this.findActiveWithTokens(accountId, provider);
+      if (!latest.isTokenExpiringSoon(10)) {
+        this.logger.log(`Token already fresh — skipping refresh: ${provider}/${accountId}`);
+        return this.oauthSvc.decryptInPlace(latest);
+      }
+      Object.assign(entity, latest);
+
       const refreshToken = this.encryption.decrypt(entity.refreshTokenEnc!);
       let   refreshUrl   = config.refreshUrl || config.tokenUrl;
 
@@ -67,6 +89,10 @@ export class TokenService {
         } catch {
           throw new BadRequestException(`Cannot resolve refresh URL for ${provider}: invalid apiDomain "${entity.apiDomain}"`);
         }
+      }
+
+      if (config.dynamicRegion && entity.region && refreshUrl.includes('{region}')) {
+        refreshUrl = refreshUrl.replace('{region}', entity.region);
       }
 
       const headers: Record<string, string> = { 'Accept': 'application/json' };
@@ -114,8 +140,12 @@ export class TokenService {
         tokenType:      normalized.tokenType,
         expiresAt:      normalized.expiresAt,
       };
+
+
       if (normalized.refreshToken) {
         patch.refreshTokenEnc = this.encryption.encrypt(normalized.refreshToken);
+      } else {
+        this.logger.debug(`Provider did not rotate refresh_token for ${provider} — keeping existing`);
       }
 
       let refreshJobId: string | undefined;

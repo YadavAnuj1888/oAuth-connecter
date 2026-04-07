@@ -249,10 +249,13 @@ export class CallerdeskController {
     const p = provider.toLowerCase();
     if (!CRM_PROVIDERS[p]) throw new BadRequestException(`Provider "${p}" is not supported.`);
     const config = CRM_PROVIDERS[p];
+    if (config.authType === 'form') {
+      return { authUrl: config.formUrl };
+    }
     if (config.authType !== 'oauth') throw new BadRequestException(`Provider "${p}" does not use OAuth.`);
     if (!accountId) throw new BadRequestException('account_id is required.');
 
-    // Fall back to env vars when client_id / client_secret not in query
+
     const resolvedClientId     = clientId     || process.env[`${p.toUpperCase()}_CLIENT_ID`];
     const resolvedClientSecret = clientSecret || process.env[`${p.toUpperCase()}_CLIENT_SECRET`];
     if (!resolvedClientId || !resolvedClientSecret) {
@@ -314,85 +317,22 @@ export class CallerdeskController {
     };
   }
 
-  @Post('crm/hubspot/detail')
+  @Post('crm/:provider/detail')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'HubSpot — get detail' })
+  @ApiOperation({ summary: 'Get connection detail for any CRM provider' })
+  @ApiParam(PROVIDER_PARAM)
   @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
   @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'HubSpot connection detail' })
-  async hubspotDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('hubspot', body); }
-
-  @Post('crm/zoho/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Zoho — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Zoho connection detail' })
-  async zohoDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('zoho', body); }
-
-  @Post('crm/salesforce/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Salesforce — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Salesforce connection detail' })
-  async salesforceDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('salesforce', body); }
-
-  @Post('crm/pipedrive/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Pipedrive — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Pipedrive connection detail' })
-  async pipedriveDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('pipedrive', body); }
-
-  @Post('crm/freshsales/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Freshsales — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Freshsales connection detail' })
-  async freshsalesDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('freshsales', body); }
-
-  @Post('crm/freshdesk/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Freshdesk — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Freshdesk connection detail' })
-  async freshdeskDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('freshdesk', body); }
-
-  @Post('crm/odoo/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Odoo — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Odoo connection detail' })
-  async odooDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('odoo', body); }
-
-  @Post('crm/bitrix24/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Bitrix24 — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Bitrix24 connection detail' })
-  async bitrix24Detail(@Body() body: Record<string, any>) { return this.getProviderDetail('bitrix24', body); }
-
-  @Post('crm/kommo/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Kommo — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Kommo connection detail' })
-  async kommoDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('kommo', body); }
-
-  @Post('crm/shopify/detail')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Shopify — get detail' })
-  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
-  @ApiBody(USER_ID_BODY)
-  @ApiResponse({ status: 200, description: 'Shopify connection detail' })
-  async shopifyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('shopify', body); }
+  @ApiResponse({ status: 200, description: 'Provider connection detail' })
+  @ApiResponse({ status: 400, description: 'Unsupported provider or missing user_id' })
+  async providerDetail(
+    @Param('provider') provider: string,
+    @Body() body: Record<string, any>,
+  ) {
+    const p = provider.toLowerCase();
+    if (!CRM_PROVIDERS[p]) throw new BadRequestException(`Provider "${p}" is not supported.`);
+    return this.getProviderDetail(p, body);
+  }
 
   @Post('all_detail')
   @HttpCode(HttpStatus.OK)
@@ -420,9 +360,17 @@ export class CallerdeskController {
     @Query() query: Record<string, string>,
   ) {
     const { code, state, ...rest } = query;
-    const stateData = await this.oauthSvc['stateStore'].get(state);
-    const accountId = stateData?.accountId || 'unknown';
     const panelUrl = process.env.FRONTEND_URL || 'https://app.callerdesk.io/admin/';
+
+
+    if (!code || !state) {
+      return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>Missing code or state in callback URL.</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=false"; }, 3000);</script></body></html>`;
+    }
+    const stateData = await this.oauthSvc['stateStore'].get(state);
+    if (!stateData) {
+      return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>Your authorization session expired. Please click Connect again.</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=false&error=expired_state"; }, 3000);</script></body></html>`;
+    }
+    const accountId = stateData.accountId || 'unknown';
     try {
       const entity = await this.oauthSvc.handleOAuthCallback(provider.toLowerCase(), code, state, accountId, rest);
       this.logger.log(`${provider} connected for accountId: ${entity.accountId} — tokens stored in DB`);

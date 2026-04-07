@@ -1,7 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 
-export type AuthType   = 'oauth' | 'credentials';
+export type AuthType   = 'oauth' | 'credentials' | 'form';
 export type AuthMethod = 'body'  | 'basic';
+
+export interface FormProviderConfig {
+  authType: 'form';
+  formUrl:  string;
+  metadata: ProviderMetadata;
+}
 
 export interface ProviderMetadata { displayName: string; logo: string; color: string; }
 
@@ -20,6 +26,7 @@ export interface OAuthProviderConfig {
   promptConsent?:        boolean;
   dynamicAuthUrl?:       boolean;
   dynamicUrl?:           boolean;
+  dynamicRegion?:        boolean;
   tokenContentType?:     'json' | 'form';
   rotatesRefreshToken?:  boolean;
   metadata:              ProviderMetadata;
@@ -30,19 +37,22 @@ export interface CredentialProviderConfig {
   metadata: ProviderMetadata;
 }
 
-export type ProviderConfig = OAuthProviderConfig | CredentialProviderConfig;
+export type ProviderConfig = OAuthProviderConfig | CredentialProviderConfig | FormProviderConfig;
 
 export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
 
   zoho: {
     authType: 'oauth', authMethod: 'body', pkce: false,
-    authUrl:    'https://accounts.zoho.com/oauth/v2/auth',
-    tokenUrl:   'https://accounts.zoho.com/oauth/v2/token',
-    refreshUrl: 'https://accounts.zoho.com/oauth/v2/token',
-    apiDomain: 'https://www.zohoapis.com/crm/v3/', scopeSeparator: ',',
+
+    authUrl:    'https://accounts.zoho.{region}/oauth/v2/auth',
+    tokenUrl:   'https://accounts.zoho.{region}/oauth/v2/token',
+    refreshUrl: 'https://accounts.zoho.{region}/oauth/v2/token',
+    apiDomain:  'https://www.zohoapis.{region}/crm/v3/',
+    scopeSeparator: ',',
     redirectUrl: process.env.ZOHO_REDIRECT_URL || 'https://app.callerdesk.io/admin/zoho-data',
     scopes: ['PhoneBridge.call.log','PhoneBridge.zohoone.search'],
     promptConsent: true,
+    dynamicRegion: true,
     userIdPath: 'user_id',
     metadata: { displayName: 'Zoho', logo: 'https://cdn.simpleicons.org/zoho/E42527', color: '#E42527' },
   },
@@ -127,6 +137,41 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     redirectUrl:  process.env.EXAMPLECRM_REDIRECT_URL || 'https://app.callerdesk.io/admin/examplecrm-data',
     userIdPath:   'user_id',
     metadata: { displayName: 'ExampleCRM', logo: '', color: '#6C63FF' },
+  },
+
+  faveo: {
+    authType: 'oauth', authMethod: 'body', pkce: false,
+    authUrl:    'https://testaccount.faveocloud.com/oauth/authorize',
+    tokenUrl:   'https://testaccount.faveocloud.com/oauth/token',
+    refreshUrl: 'https://testaccount.faveocloud.com/oauth/token',
+    apiDomain: 'https://testaccount.faveocloud.com/', scopeSeparator: ' ',
+    redirectUrl: process.env.FAVEO_REDIRECT_URL || 'https://app.callerdesk.io/admin/faveo-data/',
+    scopes: ['*'],
+    metadata: { displayName: 'Faveo', logo: '', color: '#0078D4' },
+  },
+
+  borgerp: {
+    authType: 'form',
+    formUrl:  'https://docs.google.com/forms/d/e/1FAIpQLSfYfDN8s-b9AoVvlONmJ0BBC3PrUjibo5jJvb_n-xKTcekOMw/viewform',
+    metadata: { displayName: 'Borg ERP', logo: '', color: '#6A1B9A' },
+  },
+
+  telecrm: {
+    authType: 'form',
+    formUrl:  'https://docs.google.com/forms/d/e/1FAIpQLSc8qE-r5NBHIc11Zrm3wH4YEjEblIzmrl855oe4A_7CpOktRA/viewform',
+    metadata: { displayName: 'TeleCRM', logo: '', color: '#1E88E5' },
+  },
+
+  pabbly: {
+    authType: 'form',
+    formUrl:  'https://accounts.pabbly.com/login',
+    metadata: { displayName: 'Pabbly', logo: '', color: '#FF6B35' },
+  },
+
+  superleap: {
+    authType: 'form',
+    formUrl:  'https://docs.google.com/forms/d/e/1FAIpQLSeW6KCYXO6eJsQY6U82J31m0zukZdThR7niX_TKoitn-NHi-w/viewform',
+    metadata: { displayName: 'SuperLeap', logo: '', color: '#4285F4' },
   },
 
   freshsales: {
