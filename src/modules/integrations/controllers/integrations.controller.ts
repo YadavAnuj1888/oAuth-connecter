@@ -2,7 +2,7 @@ import {
   Controller, Post, Get, Delete,
   Param, Body, Query, Req,
   HttpCode, HttpStatus,
-  UseGuards, ValidationPipe,
+  UseGuards,
   BadRequestException, UnauthorizedException, Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
@@ -334,6 +334,76 @@ export class CallerdeskController {
     return this.getProviderDetail(p, body);
   }
 
+  @Post('bitrix_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bitrix24 — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async bitrixDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('bitrix24', body); }
+
+  @Post('zoho_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Zoho — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async zohoLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('zoho', body); }
+
+  @Post('hubspot_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'HubSpot — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async hubspotLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('hubspot', body); }
+
+  @Post('salesforce_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Salesforce — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async salesforceLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('salesforce', body); }
+
+  @Post('pipedrive_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Pipedrive — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async pipedriveLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('pipedrive', body); }
+
+  @Post('freshsales_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Freshsales — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async freshsalesLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('freshsales', body); }
+
+  @Post('freshdesk_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Freshdesk — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async freshdeskLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('freshdesk', body); }
+
+  @Post('odoo_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Odoo — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async odooLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('odoo', body); }
+
+  @Post('kommo_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Kommo — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async kommoLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('kommo', body); }
+
+  @Post('shopify_detail')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Shopify — get detail' })
+  @ApiConsumes('application/x-www-form-urlencoded', 'application/json', 'multipart/form-data')
+  @ApiBody(USER_ID_BODY)
+  async shopifyLegacyDetail(@Body() body: Record<string, any>) { return this.getProviderDetail('shopify', body); }
+
   @Post('all_detail')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get detail for all connected CRMs', description: 'Returns token detail for every active CRM for the given user_id.' })
@@ -402,7 +472,19 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'JWT issued' })
   @ApiResponse({ status: 400, description: 'Missing accountId' })
-  issueToken(@Body() body: { accountId?: string; account_id?: string }) {
+  issueToken(
+    @Body() body: { accountId?: string; account_id?: string },
+    @Req() req: Request,
+  ) {
+    const internalKey = process.env.INTERNAL_API_KEY;
+    if (internalKey) {
+      const provided = (req.headers['x-internal-api-key'] as string) || '';
+      if (provided !== internalKey) {
+        throw new UnauthorizedException('Invalid or missing x-internal-api-key header');
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new UnauthorizedException('INTERNAL_API_KEY must be set in production');
+    }
     const accountId = body.accountId || body.account_id;
     if (!accountId) throw new BadRequestException('accountId is required');
     const secret = process.env.JWT_SECRET;

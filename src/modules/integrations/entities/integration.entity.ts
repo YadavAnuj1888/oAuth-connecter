@@ -63,6 +63,18 @@ export class IntegrationEntity {
   @Column({ name: 'region', length: 10, nullable: true })
   region: string | null;
 
+  @Column({ name: 'type', length: 50, nullable: true })
+  type: string | null;
+
+  @Column({ name: 'campaign_name1', length: 255, nullable: true })
+  campaignName1: string | null;
+
+  @Column({ name: 'campaign_name2', length: 255, nullable: true })
+  campaignName2: string | null;
+
+  @Column({ name: 'event', length: 255, nullable: true })
+  event: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

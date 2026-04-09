@@ -24,13 +24,16 @@ export class TokenService {
   async getValidToken(accountId: string, provider: string): Promise<IntegrationEntity> {
     const entity = await this.findActiveWithTokens(accountId, provider);
 
-    if (entity.isTokenExpiringSoon(10) && entity.refreshTokenEnc) {
-      this.logger.log(`Token expiring soon — auto-refreshing: ${provider}, accountId: ${accountId}`);
+    if (entity.isTokenExpired() && entity.refreshTokenEnc) {
       return this.refreshToken(accountId, provider, entity);
     }
+
+    if (entity.isTokenExpiringSoon(10) && entity.refreshTokenEnc) {
+      this.triggerBackgroundRefresh(accountId, provider, entity.id);
+    }
+
     return this.oauthSvc.decryptInPlace(entity);
   }
-
 
   async getValidAccessToken(accountId: string, provider: string): Promise<string> {
     const entity = await this.getValidToken(accountId, provider);
@@ -38,6 +41,18 @@ export class TokenService {
       throw new UnauthorizedException(`No access token available for ${provider}. Reconnect required.`);
     }
     return entity.accessToken;
+  }
+
+  private triggerBackgroundRefresh(accountId: string, provider: string, integrationId: number): void {
+    this.refreshToken(accountId, provider).catch((err) => {
+      this.logger.warn({
+        msg:           'Background refresh failed',
+        provider,
+        accountId,
+        integrationId,
+        error:         err.message,
+      });
+    });
   }
 
   async refreshToken(
@@ -61,20 +76,26 @@ export class TokenService {
 
     const lockAcquired = await this.oauthSvc.acquireRefreshLock(entity.id);
     if (!lockAcquired) {
-
-
-      this.logger.warn(`Refresh lock busy — waiting for in-flight refresh: ${provider}/${accountId}`);
+      this.logger.warn({
+        msg:           'Refresh lock busy — waiting for in-flight refresh',
+        provider,
+        accountId,
+        integrationId: entity.id,
+      });
       await new Promise((r) => setTimeout(r, 1500));
       const fresh = await this.findActiveWithTokens(accountId, provider);
       return this.oauthSvc.decryptInPlace(fresh);
     }
-    this.logger.log(`Refreshing token: ${provider}, accountId: ${accountId}`);
 
     try {
-
       const latest = await this.findActiveWithTokens(accountId, provider);
       if (!latest.isTokenExpiringSoon(10)) {
-        this.logger.log(`Token already fresh — skipping refresh: ${provider}/${accountId}`);
+        this.logger.log({
+          msg:           'Token already fresh — skipping refresh',
+          provider,
+          accountId,
+          integrationId: entity.id,
+        });
         return this.oauthSvc.decryptInPlace(latest);
       }
       Object.assign(entity, latest);
@@ -124,11 +145,24 @@ export class TokenService {
       if (!res.ok) {
         const errorBody = await res.text();
         if (res.status === 401 || res.status === 400) {
-          this.logger.warn(`Refresh token revoked: ${provider}, accountId: ${accountId} — marking inactive`);
-          await this.repo.update(entity.id, { isActive: false });
+          this.logger.warn({
+            msg:           'Refresh token revoked — marking inactive',
+            provider,
+            accountId,
+            integrationId: entity.id,
+            status:        res.status,
+          });
+          await this.repo.update(entity.id, { isActive: false, refreshJobId: null });
           throw new UnauthorizedException(`Refresh token revoked for ${provider}. Please reconnect.`);
         }
-        this.logger.error(`Token refresh failed: ${provider}, status: ${res.status}, body: ${errorBody}`);
+        this.logger.error({
+          msg:           'Token refresh failed',
+          provider,
+          accountId,
+          integrationId: entity.id,
+          status:        res.status,
+          body:          errorBody.substring(0, 200),
+        });
         throw new BadRequestException(`Token refresh failed for ${provider}: ${errorBody}`);
       }
 
@@ -141,11 +175,8 @@ export class TokenService {
         expiresAt:      normalized.expiresAt,
       };
 
-
       if (normalized.refreshToken) {
         patch.refreshTokenEnc = this.encryption.encrypt(normalized.refreshToken);
-      } else {
-        this.logger.debug(`Provider did not rotate refresh_token for ${provider} — keeping existing`);
       }
 
       let refreshJobId: string | undefined;
@@ -156,9 +187,20 @@ export class TokenService {
       await this.repo.update(entity.id, finalPatch);
 
       Object.assign(entity, finalPatch);
-      this.logger.log(`Token refreshed successfully: ${provider}, accountId: ${accountId}`);
+      this.logger.log({
+        msg:           'Token refreshed successfully',
+        provider,
+        accountId,
+        integrationId: entity.id,
+        expiresAt:     normalized.expiresAt?.toISOString() ?? null,
+      });
       return this.oauthSvc.decryptInPlace(entity);
 
+    } catch (err: any) {
+      if (err instanceof UnauthorizedException) {
+        await this.repo.update(entity.id, { isActive: false, refreshJobId: null });
+      }
+      throw err;
     } finally {
       await this.oauthSvc.releaseRefreshLock(entity.id);
     }
@@ -166,7 +208,7 @@ export class TokenService {
 
   async disconnect(accountId: string, provider: string): Promise<void> {
     const entity = await this.findActive(accountId, provider);
-    this.logger.log(`Disconnecting ${provider} for accountId: ${accountId}`);
+    this.logger.log({ msg: 'Disconnecting', provider, accountId, integrationId: entity.id });
     if (entity.refreshJobId) await this.refreshQueue.cancelJob(entity.refreshJobId);
     await this.repo.update(entity.id, {
       isActive: false, accessTokenEnc: null,
@@ -196,7 +238,8 @@ export class TokenService {
       where:  { accountId, isActive: true },
       order:  { createdAt: 'DESC' },
       select: ['id','accountId','provider','apiDomain','tokenType','email','expiresAt',
-               'isActive','createdAt','updatedAt','accessTokenEnc','refreshTokenEnc','credentialsEnc'],
+               'isActive','createdAt','updatedAt','type','campaignName1','campaignName2','event',
+               'accessTokenEnc','refreshTokenEnc','credentialsEnc'],
     });
     if (entities.length === 0) return { user_id: accountId };
 
@@ -212,18 +255,35 @@ export class TokenService {
   }
 
   formatDetail(provider: string, entity: IntegrationEntity): Record<string, unknown> {
+    const config = getProviderConfig(provider);
+    const isOAuth = config.authType === 'oauth';
+
+    let expiresAt: string | null = null;
+    let expiresIn: number | null = null;
+    if (isOAuth && entity.expiresAt) {
+      expiresAt = entity.expiresAt.toISOString();
+      expiresIn = Math.max(0, Math.floor((entity.expiresAt.getTime() - Date.now()) / 1000));
+    }
+
     return {
       [`${provider}_detail`]: [{
-        id:            entity.id,
-        user_id:       entity.accountId,
-        api_domain:    entity.apiDomain,
-        access_token:  entity.accessToken  ?? null,
-        refresh_token: entity.refreshToken ?? null,
-        token_type:    entity.tokenType    ?? null,
-        email:         entity.email        ?? null,
-        expires_at:    entity.expiresAt    ?? null,
-        created_at:    entity.createdAt,
-        updated_at:    entity.updatedAt,
+        id:             entity.id,
+        user_id:        entity.accountId,
+        api_domain:     entity.apiDomain,
+        access_token:   entity.accessToken  ?? null,
+        refresh_token:  entity.refreshToken ?? null,
+        token_type:     entity.tokenType    ?? null,
+        email:          entity.email        ?? null,
+        type:           entity.type         ?? null,
+        client_id:      null,
+        client_secret:  null,
+        campaign_name1: entity.campaignName1 ?? null,
+        campaign_name2: entity.campaignName2 ?? null,
+        event:          entity.event         ?? null,
+        expires_at:     expiresAt,
+        expires_in:     expiresIn,
+        created_at:     entity.createdAt,
+        updated_at:     entity.updatedAt,
       }],
     };
   }
@@ -240,7 +300,8 @@ export class TokenService {
     const entity = await this.repo.findOne({
       where:  { accountId, provider: provider.toLowerCase(), isActive: true },
       select: ['id','accountId','provider','apiDomain','tokenType','email','expiresAt',
-               'isActive','createdAt','updatedAt','refreshJobId',
+               'isActive','createdAt','updatedAt','refreshJobId','region',
+               'type','campaignName1','campaignName2','event',
                'accessTokenEnc','refreshTokenEnc','credentialsEnc',
                'clientIdEnc','clientSecretEnc'],
     });

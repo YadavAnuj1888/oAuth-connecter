@@ -38,6 +38,11 @@ export class CredentialService {
       || body.odooUrl || body.bitrixUrl || body.baseUrl || body.subDomain || body.bundleAlias
       || '';
 
+    const safeCredentials: Record<string, any> = {};
+    for (const field of config.requiredFields) {
+      if (body[field] !== undefined) safeCredentials[field] = body[field];
+    }
+
     const entity = await this.oauthSvc.upsertIntegration({
       accountId, provider, apiDomain,
       accessToken:  result.accessToken || '',
@@ -45,7 +50,7 @@ export class CredentialService {
       tokenType:    result.tokenType   || 'api_key',
       expiresAt:    null,
       email:        result.email ?? null,
-      credentials:  body,
+      credentials:  safeCredentials,
     });
 
     return this.formatResponse(provider, entity, result.accessToken);

@@ -17,10 +17,11 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
       const res = await fetch(url, { ...fetchOpts, signal: controller.signal });
       clearTimeout(timer);
 
-
       if (res.status === 429 && attempt < retries) {
         const retryAfter = parseInt(res.headers.get('retry-after') || '0', 10);
-        const wait = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt, 30_000);
+        const wait = retryAfter > 0
+          ? retryAfter * 1000
+          : backoffWithJitter(retryDelayMs, attempt);
         await sleep(wait);
         continue;
       }
@@ -29,17 +30,24 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
         return res;
       }
       if (res.status >= 500 && attempt < retries) {
-        await sleep(retryDelayMs * Math.pow(2, attempt));
+        await sleep(backoffWithJitter(retryDelayMs, attempt));
         continue;
       }
       return res;
     } catch (err: any) {
       clearTimeout(timer);
       lastError = err;
-      if (attempt < retries) await sleep(retryDelayMs * Math.pow(2, attempt));
+      if (attempt < retries) await sleep(backoffWithJitter(retryDelayMs, attempt));
     }
   }
   throw new BadGatewayException(`CRM API unreachable after ${retries} retries: ${lastError.message}`);
+}
+
+function backoffWithJitter(baseMs: number, attempt: number): number {
+  const exponential = baseMs * Math.pow(2, attempt);
+  const capped = Math.min(exponential, 30_000);
+  const jitter = Math.floor(Math.random() * capped * 0.3);
+  return capped + jitter;
 }
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
