@@ -5,7 +5,6 @@ import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as express from 'express';
-import * as multer from 'multer';
 import * as crypto from 'crypto';
 
 async function bootstrap() {
@@ -41,7 +40,6 @@ async function bootstrap() {
 
   server.use(express.json({ limit: '1mb' }));
   server.use(express.urlencoded({ extended: true, limit: '1mb' }));
-  server.use(multer({ limits: { fileSize: 5 * 1024 * 1024 } }).any());
 
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,

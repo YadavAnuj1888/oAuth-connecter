@@ -8,6 +8,8 @@ import { TenantEntity } from './tenant.entity';
 @Entity('crm_integrations')
 @Index(['tenantId', 'provider'], { unique: true })
 @Index(['tenantId', 'isActive', 'createdAt'])
+@Index(['accountId', 'isActive', 'provider'])
+@Index(['isActive', 'expiresAt'])
 export class IntegrationEntity {
 
   @PrimaryGeneratedColumn('increment')
