@@ -17,12 +17,12 @@ export class TokenService {
     @InjectRepository(IntegrationEntity)
     private readonly repo:         Repository<IntegrationEntity>,
     private readonly encryption:   EncryptionService,
-    private readonly oauthSvc:     OAuthService,
+    private readonly oauthService:     OAuthService,
     private readonly refreshQueue: TokenRefreshQueue,
   ) {}
 
   async getValidToken(accountId: string, provider: string): Promise<IntegrationEntity> {
-    const entity = await this.findActiveWithTokens(accountId, provider);
+    const entity = await this.findActiveIntegrationWithTokens(accountId, provider);
 
     if (entity.isTokenExpired() && entity.refreshTokenEnc) {
       return this.refreshToken(accountId, provider, entity);
@@ -32,7 +32,7 @@ export class TokenService {
       this.triggerBackgroundRefresh(accountId, provider, entity.id);
     }
 
-    return this.oauthSvc.decryptInPlace(entity);
+    return this.oauthService.decryptEntityTokens(entity);
   }
 
   async getValidAccessToken(accountId: string, provider: string): Promise<string> {
@@ -60,7 +60,7 @@ export class TokenService {
     provider:  string,
     preloaded?: IntegrationEntity,
   ): Promise<IntegrationEntity> {
-    const entity = preloaded ?? await this.findActiveWithTokens(accountId, provider);
+    const entity = preloaded ?? await this.findActiveIntegrationWithTokens(accountId, provider);
     if (!entity.refreshTokenEnc) throw new BadRequestException(`No refresh token for ${provider}. Please reconnect.`);
 
     const config = getProviderConfig(provider) as OAuthProviderConfig;
@@ -74,7 +74,7 @@ export class TokenService {
       );
     }
 
-    const lockAcquired = await this.oauthSvc.acquireRefreshLock(entity.id);
+    const lockAcquired = await this.oauthService.acquireRefreshLock(entity.id);
     if (!lockAcquired) {
       this.logger.warn({
         msg:           'Refresh lock busy — waiting for in-flight refresh',
@@ -83,12 +83,12 @@ export class TokenService {
         integrationId: entity.id,
       });
       await new Promise((r) => setTimeout(r, 1500));
-      const fresh = await this.findActiveWithTokens(accountId, provider);
-      return this.oauthSvc.decryptInPlace(fresh);
+      const fresh = await this.findActiveIntegrationWithTokens(accountId, provider);
+      return this.oauthService.decryptEntityTokens(fresh);
     }
 
     try {
-      const latest = await this.findActiveWithTokens(accountId, provider);
+      const latest = await this.findActiveIntegrationWithTokens(accountId, provider);
       if (!latest.isTokenExpiringSoon(10)) {
         this.logger.log({
           msg:           'Token already fresh — skipping refresh',
@@ -96,7 +96,7 @@ export class TokenService {
           accountId,
           integrationId: entity.id,
         });
-        return this.oauthSvc.decryptInPlace(latest);
+        return this.oauthService.decryptEntityTokens(latest);
       }
       Object.assign(entity, latest);
 
@@ -194,7 +194,7 @@ export class TokenService {
         integrationId: entity.id,
         expiresAt:     normalized.expiresAt?.toISOString() ?? null,
       });
-      return this.oauthSvc.decryptInPlace(entity);
+      return this.oauthService.decryptEntityTokens(entity);
 
     } catch (err: any) {
       if (err instanceof UnauthorizedException) {
@@ -202,12 +202,12 @@ export class TokenService {
       }
       throw err;
     } finally {
-      await this.oauthSvc.releaseRefreshLock(entity.id);
+      await this.oauthService.releaseRefreshLock(entity.id);
     }
   }
 
   async disconnect(accountId: string, provider: string): Promise<void> {
-    const entity = await this.findActive(accountId, provider);
+    const entity = await this.findActiveIntegration(accountId, provider);
     this.logger.log({ msg: 'Disconnecting', provider, accountId, integrationId: entity.id });
     if (entity.refreshJobId) await this.refreshQueue.cancelJob(entity.refreshJobId);
     await this.repo.update(entity.id, {
@@ -227,7 +227,7 @@ export class TokenService {
   async getDetail(accountId: string, provider: string): Promise<Record<string, unknown>> {
     try {
       const entity = await this.getValidToken(accountId, provider);
-      return this.formatDetail(provider, entity);
+      return this.formatIntegrationDetail(provider, entity);
     } catch {
       return { [`${provider}_detail`]: [] };
     }
@@ -245,16 +245,16 @@ export class TokenService {
 
     const result: Record<string, unknown> = { user_id: accountId };
     for (const entity of entities) {
-      Object.assign(result, this.formatDetail(entity.provider, this.oauthSvc.decryptInPlace(entity)));
+      Object.assign(result, this.formatIntegrationDetail(entity.provider, this.oauthService.decryptEntityTokens(entity)));
     }
     return result;
   }
 
   async getTokenMeta(accountId: string, provider: string): Promise<IntegrationEntity> {
-    return this.findActive(accountId, provider);
+    return this.findActiveIntegration(accountId, provider);
   }
 
-  formatDetail(provider: string, entity: IntegrationEntity): Record<string, unknown> {
+  formatIntegrationDetail(provider: string, entity: IntegrationEntity): Record<string, unknown> {
     const config = getProviderConfig(provider);
     const isOAuth = config.authType === 'oauth';
 
@@ -288,7 +288,7 @@ export class TokenService {
     };
   }
 
-  private async findActive(accountId: string, provider: string): Promise<IntegrationEntity> {
+  private async findActiveIntegration(accountId: string, provider: string): Promise<IntegrationEntity> {
     const entity = await this.repo.findOne({
       where: { accountId, provider: provider.toLowerCase(), isActive: true },
     });
@@ -296,7 +296,7 @@ export class TokenService {
     return entity;
   }
 
-  private async findActiveWithTokens(accountId: string, provider: string): Promise<IntegrationEntity> {
+  private async findActiveIntegrationWithTokens(accountId: string, provider: string): Promise<IntegrationEntity> {
     const entity = await this.repo.findOne({
       where:  { accountId, provider: provider.toLowerCase(), isActive: true },
       select: ['id','accountId','provider','apiDomain','tokenType','email','expiresAt',

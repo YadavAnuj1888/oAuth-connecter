@@ -16,7 +16,11 @@ import { HealthController }   from './common/health/health.controller';
       validationSchema: Joi.object({
         NODE_ENV:               Joi.string().valid('development','production','test').default('development'),
         PORT:                   Joi.number().default(3000),
+        BASE_URL:               Joi.string().optional(),
+        FRONTEND_URL:           Joi.string().optional(),
+        CORS_ORIGINS:           Joi.string().optional(),
         JWT_SECRET:             Joi.string().min(32).required(),
+        JWT_EXPIRATION:         Joi.string().default('7d'),
         ENCRYPTION_KEY:         Joi.string().min(32).required(),
         REDIS_URL:              Joi.string().required(),
         DB_HOST:                Joi.string().required(),
@@ -24,14 +28,23 @@ import { HealthController }   from './common/health/health.controller';
         DB_USERNAME:            Joi.string().required(),
         DB_PASSWORD:            Joi.string().required(),
         DB_NAME:                Joi.string().required(),
-        FRONTEND_URL:           Joi.string().optional(),
+        DB_CONNECTION_LIMIT:    Joi.number().default(30),
+        DB_CONNECT_TIMEOUT:     Joi.number().default(10000),
+        THROTTLE_TTL:           Joi.number().default(60000),
+        THROTTLE_LIMIT:         Joi.number().default(60),
+        OAUTH_STATE_TTL:        Joi.number().default(600),
+        REFRESH_LOCK_TTL:       Joi.number().default(60),
+        REFRESH_BUFFER_MINUTES: Joi.number().default(10),
         ALLOWED_REDIRECT_HOSTS: Joi.string().optional(),
         INTERNAL_API_KEY:       Joi.string().min(16).optional(),
       }),
       validationOptions: { abortEarly: false },
     }),
 
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
+    ThrottlerModule.forRoot([{
+      ttl:   parseInt(process.env.THROTTLE_TTL || '60000'),
+      limit: parseInt(process.env.THROTTLE_LIMIT || '60'),
+    }]),
 
     TypeOrmModule.forRoot({
       type:        'mysql',
@@ -43,7 +56,10 @@ import { HealthController }   from './common/health/health.controller';
       entities:    [IntegrationEntity, TenantEntity],
       synchronize: process.env.NODE_ENV !== 'production',
       logging:     ['error'],
-      extra:       { connectionLimit: 30, connectTimeout: 10_000 },
+      extra: {
+        connectionLimit:  parseInt(process.env.DB_CONNECTION_LIMIT || '30'),
+        connectTimeout:   parseInt(process.env.DB_CONNECT_TIMEOUT || '10000'),
+      },
     }),
 
     TypeOrmModule.forFeature([IntegrationEntity]),

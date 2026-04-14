@@ -29,6 +29,7 @@ export interface OAuthProviderConfig {
   dynamicRegion?:        boolean;
   tokenContentType?:     'json' | 'form';
   rotatesRefreshToken?:  boolean;
+  optionalScopes?:       string[];
   metadata:              ProviderMetadata;
 }
 
@@ -39,18 +40,19 @@ export interface CredentialProviderConfig {
 
 export type ProviderConfig = OAuthProviderConfig | CredentialProviderConfig | FormProviderConfig;
 
+const PANEL_URL = process.env.FRONTEND_URL || process.env.BASE_URL || 'http://localhost:3000';
+
 export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
 
   zoho: {
     authType: 'oauth', authMethod: 'body', pkce: false,
-
     authUrl:    'https://accounts.zoho.{region}/oauth/v2/auth',
     tokenUrl:   'https://accounts.zoho.{region}/oauth/v2/token',
     refreshUrl: 'https://accounts.zoho.{region}/oauth/v2/token',
     apiDomain:  'https://www.zohoapis.{region}/crm/v3/',
     scopeSeparator: ',',
-    redirectUrl: process.env.ZOHO_REDIRECT_URL || 'https://app.callerdesk.io/admin/zoho-data',
-    scopes: ['PhoneBridge.call.log','PhoneBridge.zohoone.search'],
+    redirectUrl: process.env.ZOHO_REDIRECT_URL || `${PANEL_URL}/zoho-data`,
+    scopes: ['ZohoCRM.modules.ALL','ZohoCRM.settings.ALL','ZohoCRM.users.READ'],
     promptConsent: true,
     dynamicRegion: true,
     userIdPath: 'user_id',
@@ -63,8 +65,9 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     tokenUrl:   'https://api.hubapi.com/oauth/v1/token',
     refreshUrl: 'https://api.hubapi.com/oauth/v1/token',
     apiDomain: 'https://api.hubapi.com/', scopeSeparator: ' ',
-    redirectUrl: process.env.HUBSPOT_REDIRECT_URL || 'https://app.callerdesk.io/admin/hubspot-data',
-    scopes: ['crm.objects.contacts.read','crm.objects.contacts.write','crm.objects.deals.read','crm.objects.deals.write','crm.objects.calls.write','tickets'],
+    redirectUrl: process.env.HUBSPOT_REDIRECT_URL || `${PANEL_URL}/hubspot-data`,
+    scopes: ['oauth'],
+    optionalScopes: ['crm.objects.contacts.read','crm.objects.contacts.write','crm.objects.deals.read','crm.objects.deals.write','crm.dealsplits.read_write','crm.lists.read','crm.lists.write'],
     userIdPath: 'hub_id',
     metadata: { displayName: 'HubSpot', logo: 'https://cdn.simpleicons.org/hubspot/FF7A59', color: '#FF7A59' },
   },
@@ -75,7 +78,7 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     tokenUrl:   'https://login.salesforce.com/services/oauth2/token',
     refreshUrl: 'https://login.salesforce.com/services/oauth2/token',
     apiDomain: 'https://login.salesforce.com/services/data/v59.0/', scopeSeparator: ' ',
-    redirectUrl: process.env.SALESFORCE_REDIRECT_URL || 'https://app.callerdesk.io/admin/salesforce-data',
+    redirectUrl: process.env.SALESFORCE_REDIRECT_URL || `${PANEL_URL}/salesforce-data`,
     scopes: ['api','refresh_token','offline_access'],
     userIdPath: 'id',
     metadata: { displayName: 'Salesforce', logo: '', color: '#00A1E0' },
@@ -87,7 +90,7 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     tokenUrl:   'https://oauth.pipedrive.com/oauth/token',
     refreshUrl: 'https://oauth.pipedrive.com/oauth/token',
     apiDomain: 'https://api.pipedrive.com/v1/', scopeSeparator: ' ', scopes: [],
-    redirectUrl: process.env.PIPEDRIVE_REDIRECT_URL || 'https://app.callerdesk.io/admin/pipedrive-data',
+    redirectUrl: process.env.PIPEDRIVE_REDIRECT_URL || `${PANEL_URL}/pipedrive-data`,
     rotatesRefreshToken: true,
     userIdPath: 'data.id',
     metadata: { displayName: 'Pipedrive', logo: '', color: '#1A1A2E' },
@@ -113,64 +116,43 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     metadata: { displayName: 'Odoo', logo: 'https://cdn.simpleicons.org/odoo/875A7B', color: '#875A7B' },
   },
 
-  examplecrm2: {
-    authType:       'credentials',
-    requiredFields: ['apiKey', 'subdomain'],
-    metadata: { displayName: 'ExampleCRM2', logo: '', color: '#FF5733' },
-  },
-
   freshdesk: {
     authType: 'credentials', requiredFields: ['bundleAlias','apiKey'],
     metadata: { displayName: 'Freshdesk', logo: '', color: '#27B4AC' },
   },
 
-  examplecrm: {
-    authType:     'oauth',
-    authMethod:   'body',
-    pkce:         false,
-    authUrl:      'https://examplecrm.com/oauth/authorize',
-    tokenUrl:     'https://examplecrm.com/oauth/token',
-    refreshUrl:   'https://examplecrm.com/oauth/token',
-    apiDomain:    'https://api.examplecrm.com/',
-    scopes:       ['contacts.read', 'contacts.write'],
-    scopeSeparator: ' ',
-    redirectUrl:  process.env.EXAMPLECRM_REDIRECT_URL || 'https://app.callerdesk.io/admin/examplecrm-data',
-    userIdPath:   'user_id',
-    metadata: { displayName: 'ExampleCRM', logo: '', color: '#6C63FF' },
-  },
-
   faveo: {
     authType: 'oauth', authMethod: 'body', pkce: false,
-    authUrl:    'https://testaccount.faveocloud.com/oauth/authorize',
-    tokenUrl:   'https://testaccount.faveocloud.com/oauth/token',
-    refreshUrl: 'https://testaccount.faveocloud.com/oauth/token',
-    apiDomain: 'https://testaccount.faveocloud.com/', scopeSeparator: ' ',
-    redirectUrl: process.env.FAVEO_REDIRECT_URL || 'https://app.callerdesk.io/admin/faveo-data/',
+    authUrl:    process.env.FAVEO_BASE_URL ? `${process.env.FAVEO_BASE_URL}/oauth/authorize` : 'https://testaccount.faveocloud.com/oauth/authorize',
+    tokenUrl:   process.env.FAVEO_BASE_URL ? `${process.env.FAVEO_BASE_URL}/oauth/token` : 'https://testaccount.faveocloud.com/oauth/token',
+    refreshUrl: process.env.FAVEO_BASE_URL ? `${process.env.FAVEO_BASE_URL}/oauth/token` : 'https://testaccount.faveocloud.com/oauth/token',
+    apiDomain:  process.env.FAVEO_BASE_URL || 'https://testaccount.faveocloud.com/', scopeSeparator: ' ',
+    redirectUrl: process.env.FAVEO_REDIRECT_URL || `${PANEL_URL}/faveo-data`,
     scopes: ['*'],
     metadata: { displayName: 'Faveo', logo: '', color: '#0078D4' },
   },
 
   borgerp: {
     authType: 'form',
-    formUrl:  'https://docs.google.com/forms/d/e/1FAIpQLSfYfDN8s-b9AoVvlONmJ0BBC3PrUjibo5jJvb_n-xKTcekOMw/viewform',
+    formUrl:  process.env.BORGERP_FORM_URL || 'https://docs.google.com/forms/d/e/1FAIpQLSfYfDN8s-b9AoVvlONmJ0BBC3PrUjibo5jJvb_n-xKTcekOMw/viewform',
     metadata: { displayName: 'Borg ERP', logo: '', color: '#6A1B9A' },
   },
 
   telecrm: {
     authType: 'form',
-    formUrl:  'https://docs.google.com/forms/d/e/1FAIpQLSc8qE-r5NBHIc11Zrm3wH4YEjEblIzmrl855oe4A_7CpOktRA/viewform',
+    formUrl:  process.env.TELECRM_FORM_URL || 'https://docs.google.com/forms/d/e/1FAIpQLSc8qE-r5NBHIc11Zrm3wH4YEjEblIzmrl855oe4A_7CpOktRA/viewform',
     metadata: { displayName: 'TeleCRM', logo: '', color: '#1E88E5' },
   },
 
   pabbly: {
     authType: 'form',
-    formUrl:  'https://accounts.pabbly.com/login',
+    formUrl:  process.env.PABBLY_FORM_URL || 'https://accounts.pabbly.com/login',
     metadata: { displayName: 'Pabbly', logo: '', color: '#FF6B35' },
   },
 
   superleap: {
     authType: 'form',
-    formUrl:  'https://docs.google.com/forms/d/e/1FAIpQLSeW6KCYXO6eJsQY6U82J31m0zukZdThR7niX_TKoitn-NHi-w/viewform',
+    formUrl:  process.env.SUPERLEAP_FORM_URL || 'https://docs.google.com/forms/d/e/1FAIpQLSeW6KCYXO6eJsQY6U82J31m0zukZdThR7niX_TKoitn-NHi-w/viewform',
     metadata: { displayName: 'SuperLeap', logo: '', color: '#4285F4' },
   },
 
@@ -182,7 +164,7 @@ export const CRM_PROVIDERS: Record<string, ProviderConfig> = {
     apiDomain:  'https://{subdomain}/',
     scopeSeparator: ' ',
     scopes: ['contact.view', 'contact.manage'],
-    redirectUrl: process.env.FRESHSALES_REDIRECT_URL || 'https://app.callerdesk.io/admin/freshsales-data',
+    redirectUrl: process.env.FRESHSALES_REDIRECT_URL || `${PANEL_URL}/freshsales-data`,
     dynamicAuthUrl: true,
     userIdPath: 'id',
     metadata: { displayName: 'Freshsales', logo: '', color: '#0CA560' },

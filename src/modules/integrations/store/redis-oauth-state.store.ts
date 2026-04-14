@@ -12,10 +12,10 @@ export interface OAuthState {
   meta?:         Record<string, string>;
 }
 
-const TTL           = 600;
+const TTL           = parseInt(process.env.OAUTH_STATE_TTL || '600');
 const PREFIX        = 'oauth:state:';
 const LOCK_PREFIX   = 'refresh:lock:';
-const LOCK_TTL_SECS = 60;
+const LOCK_TTL_SECS = parseInt(process.env.REFRESH_LOCK_TTL || '60');
 
 @Injectable()
 export class RedisOAuthStateStore implements OnModuleDestroy {
@@ -50,7 +50,7 @@ export class RedisOAuthStateStore implements OnModuleDestroy {
     return data;
   }
 
-  async verifyAndDelete(state: string, provider: string, accountId: string): Promise<OAuthState | null> {
+  async verifyAndDeleteOAuthState(state: string, provider: string, accountId: string): Promise<OAuthState | null> {
     const raw = await this.client.getDel(`${PREFIX}${state}`);
     if (!raw) return null;
     const data: OAuthState = JSON.parse(raw);

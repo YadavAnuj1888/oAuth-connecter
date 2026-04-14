@@ -24,11 +24,12 @@ export class TokenRefreshQueue implements OnModuleDestroy {
 
   async scheduleRefresh(integrationId: number, expiresAt: Date): Promise<string> {
 
-    const REFRESH_BUFFER_MS = 10 * 60 * 1000;
+    const bufferMin = parseInt(process.env.REFRESH_BUFFER_MINUTES || '10');
+    const REFRESH_BUFFER_MS = bufferMin * 60 * 1000;
     const delay = Math.max(expiresAt.getTime() - Date.now() - REFRESH_BUFFER_MS, 0);
 
 
-    const jobId = `refresh:${integrationId}`;
+    const jobId = `refresh-${integrationId}`;
     await this.queue.remove(jobId).catch(() => {});
     await this.queue.add('refresh-token', { integrationId }, {
       jobId,

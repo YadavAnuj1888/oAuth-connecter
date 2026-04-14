@@ -10,7 +10,7 @@ import '../verifiers';
 export class CredentialService {
   private readonly logger = new Logger(CredentialService.name);
 
-  constructor(private readonly oauthSvc: OAuthService) {}
+  constructor(private readonly oauthService: OAuthService) {}
 
   async connect(
     provider:  string,
@@ -43,7 +43,7 @@ export class CredentialService {
       if (body[field] !== undefined) safeCredentials[field] = body[field];
     }
 
-    const entity = await this.oauthSvc.upsertIntegration({
+    const entity = await this.oauthService.saveOrUpdateIntegration({
       accountId, provider, apiDomain,
       accessToken:  result.accessToken || '',
       refreshToken: null,
@@ -53,10 +53,10 @@ export class CredentialService {
       credentials:  safeCredentials,
     });
 
-    return this.formatResponse(provider, entity, result.accessToken);
+    return this.formatCredentialResponse(provider, entity, result.accessToken);
   }
 
-  private formatResponse(
+  private formatCredentialResponse(
     provider:    string,
     entity:      IntegrationEntity,
     accessToken: string | null,

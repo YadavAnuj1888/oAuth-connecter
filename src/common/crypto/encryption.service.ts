@@ -38,7 +38,7 @@ export class EncryptionService {
     return dec.update(ct).toString('utf8') + dec.final('utf8');
   }
 
-  mask(value: string | null): string | null {
+  maskSensitiveValue(value: string | null): string | null {
     if (!value) return null;
     if (value.length <= 8) return '****';
     return value.substring(0, 4) + '****' + value.substring(value.length - 4);

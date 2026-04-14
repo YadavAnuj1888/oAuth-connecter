@@ -32,8 +32,8 @@ import { JwtAuthGuard }          from '../../common/guards/jwt-auth.guard';
 export class IntegrationsModule {
   constructor(
     private readonly processor: TokenRefreshProcessor,
-    private readonly tokenSvc:  TokenService,
+    private readonly tokenService: TokenService,
   ) {
-    this.processor.setTokenService(this.tokenSvc);
+    this.processor.setTokenService(this.tokenService);
   }
 }

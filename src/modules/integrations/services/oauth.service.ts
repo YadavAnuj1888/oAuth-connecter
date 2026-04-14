@@ -17,14 +17,14 @@ export class OAuthService {
 
   constructor(
     @InjectRepository(IntegrationEntity)
-    private readonly repo:         Repository<IntegrationEntity>,
-    private readonly stateStore:   RedisOAuthStateStore,
-    private readonly encryption:   EncryptionService,
-    private readonly refreshQueue: TokenRefreshQueue,
-    private readonly tenantSvc:    TenantService,
+    private readonly integrationRepository: Repository<IntegrationEntity>,
+    private readonly stateStore:            RedisOAuthStateStore,
+    private readonly encryption:            EncryptionService,
+    private readonly refreshQueue:          TokenRefreshQueue,
+    private readonly tenantService:         TenantService,
   ) {}
 
-  async getAuthUrl(
+  async buildAuthUrl(
     provider: string,
     accountId: string,
     body: Record<string, any> = {},
@@ -42,15 +42,12 @@ export class OAuthService {
     const defaultRedirect = `${process.env.BASE_URL || 'http://localhost:3000'}/api/oauth/callback/${provider}`;
     const redirectUri = body.redirect_uri || defaultRedirect;
 
-
-
-    if (!this.isAllowedRedirect(redirectUri)) {
+    if (!this.isRedirectUriAllowed(redirectUri)) {
       throw new BadRequestException(`redirect_uri "${redirectUri}" is not in the allowlist.`);
     }
 
-
     this.logger.log(`OAuth start — provider=${provider} accountId=${accountId} ` +
-                    `clientId=${this.encryption.mask(clientId)} redirect=${redirectUri}`);
+                    `clientId=${this.encryption.maskSensitiveValue(clientId)} redirect=${redirectUri}`);
 
     const state = crypto.randomBytes(32).toString('hex');
 
@@ -69,7 +66,6 @@ export class OAuthService {
       authUrl = authUrl.replace('{subdomain}', subdomain);
       meta.subdomain = subdomain;
     }
-
 
     if (config.dynamicRegion) {
       const region = body.region || 'com';
@@ -94,9 +90,12 @@ export class OAuthService {
     if (config.scopes.length > 0) {
       params.scope = config.scopes.join(config.scopeSeparator);
     }
-    if (config.promptConsent)     { params.prompt = 'consent'; }
-    if (provider === 'pipedrive') { delete params.scope; delete params.access_type; }
-    if (codeChallenge)            { params.code_challenge = codeChallenge; params.code_challenge_method = 'S256'; }
+    if (config.optionalScopes && config.optionalScopes.length > 0) {
+      params.optional_scope = config.optionalScopes.join(config.scopeSeparator);
+    }
+    if (config.promptConsent) { params.prompt = 'consent'; }
+    if (config.rotatesRefreshToken) { delete params.access_type; }
+    if (codeChallenge) { params.code_challenge = codeChallenge; params.code_challenge_method = 'S256'; }
 
     const fullAuthUrl = `${authUrl}?${new URLSearchParams(params)}`;
     this.logger.log(`Auth URL generated — provider: ${provider}, accountId: ${accountId}, redirect: ${redirectUri}`);
@@ -113,7 +112,7 @@ export class OAuthService {
     const config = getProviderConfig(provider) as OAuthProviderConfig;
     if (config.authType !== 'oauth') throw new BadRequestException(`${provider} is not OAuth.`);
 
-    const stateData = await this.stateStore.verifyAndDelete(state, provider, accountId);
+    const stateData = await this.stateStore.verifyAndDeleteOAuthState(state, provider, accountId);
     if (!stateData) throw new UnauthorizedException('Invalid, expired, or tenant-mismatched OAuth state.');
 
     const { clientId, clientSecret, redirectUri } = stateData;
@@ -127,31 +126,30 @@ export class OAuthService {
       tokenUrlOverride = config.tokenUrl.replace('{subdomain}', subdomain);
     }
 
-
     let region: string | null = stateData.meta?.region || null;
     if (config.dynamicRegion) {
-      region = this.extractZohoRegion(query) || region || 'com';
+      region = this.extractRegionFromOAuthQuery(query) || region || 'com';
       tokenUrlOverride = config.tokenUrl.replace('{region}', region);
       this.logger.log(`${provider} region resolved: ${region}`);
     }
 
-    const rawToken = await this.exchangeCodeForToken({
+    const rawTokenResponse = await this.exchangeCodeForToken({
       config, clientId, clientSecret, code,
       redirectUri,
       codeVerifier: stateData.codeVerifier,
       tokenUrlOverride,
     });
-    const normalized = normalizeToken(rawToken);
+    const normalized = normalizeToken(rawTokenResponse);
     if (!normalized.accessToken) throw new BadRequestException('Token exchange returned no access_token.');
 
-    let apiDomain = rawToken.instance_url || this.resolveApiDomain(config, query, subdomain);
+    let apiDomain = rawTokenResponse.instance_url || this.resolveApiDomainUrl(config, query, subdomain);
     if (region && apiDomain.includes('{region}')) {
       apiDomain = apiDomain.replace('{region}', region);
     }
 
     this.logger.log(`Tokens received — provider: ${provider}, accountId: ${accountId}, storing in DB`);
 
-    return this.upsertIntegration({
+    return this.saveOrUpdateIntegration({
       accountId, provider, apiDomain,
       accessToken:  normalized.accessToken,
       refreshToken: normalized.refreshToken,
@@ -163,7 +161,7 @@ export class OAuthService {
     });
   }
 
-  async exchangeCodeForToken(p: {
+  async exchangeCodeForToken(tokenExchangeParams: {
     config:            OAuthProviderConfig;
     clientId:          string;
     clientSecret:      string;
@@ -172,48 +170,50 @@ export class OAuthService {
     codeVerifier:      string | null;
     tokenUrlOverride?: string;
   }): Promise<Record<string, any>> {
-    const tokenUrl = p.tokenUrlOverride || p.config.tokenUrl;
+    const tokenUrl = tokenExchangeParams.tokenUrlOverride || tokenExchangeParams.config.tokenUrl;
     const headers: Record<string, string> = { 'Accept': 'application/json' };
     let bodyStr: string;
 
     const baseFields: Record<string, string> = {
       grant_type:   'authorization_code',
-      code:         p.code,
-      redirect_uri: p.redirectUri,
+      code:         tokenExchangeParams.code,
+      redirect_uri: tokenExchangeParams.redirectUri,
     };
 
-    if (p.config.tokenContentType === 'json') {
+    if (tokenExchangeParams.config.tokenContentType === 'json') {
       headers['Content-Type'] = 'application/json';
       const jsonBody: Record<string, string> = { ...baseFields };
-      if (p.config.authMethod === 'body') {
-        jsonBody.client_id = p.clientId; jsonBody.client_secret = p.clientSecret;
+      if (tokenExchangeParams.config.authMethod === 'body') {
+        jsonBody.client_id = tokenExchangeParams.clientId;
+        jsonBody.client_secret = tokenExchangeParams.clientSecret;
       } else {
-        headers['Authorization'] = `Basic ${Buffer.from(`${p.clientId}:${p.clientSecret}`).toString('base64')}`;
+        headers['Authorization'] = `Basic ${Buffer.from(`${tokenExchangeParams.clientId}:${tokenExchangeParams.clientSecret}`).toString('base64')}`;
       }
-      if (p.codeVerifier) jsonBody.code_verifier = p.codeVerifier;
+      if (tokenExchangeParams.codeVerifier) jsonBody.code_verifier = tokenExchangeParams.codeVerifier;
       bodyStr = JSON.stringify(jsonBody);
     } else {
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
       const formBody = new URLSearchParams(baseFields);
-      if (p.config.authMethod === 'body') {
-        formBody.set('client_id', p.clientId); formBody.set('client_secret', p.clientSecret);
+      if (tokenExchangeParams.config.authMethod === 'body') {
+        formBody.set('client_id', tokenExchangeParams.clientId);
+        formBody.set('client_secret', tokenExchangeParams.clientSecret);
       } else {
-        headers['Authorization'] = `Basic ${Buffer.from(`${p.clientId}:${p.clientSecret}`).toString('base64')}`;
+        headers['Authorization'] = `Basic ${Buffer.from(`${tokenExchangeParams.clientId}:${tokenExchangeParams.clientSecret}`).toString('base64')}`;
       }
-      if (p.codeVerifier) formBody.set('code_verifier', p.codeVerifier);
+      if (tokenExchangeParams.codeVerifier) formBody.set('code_verifier', tokenExchangeParams.codeVerifier);
       bodyStr = formBody.toString();
     }
 
-    const res = await safeFetch(tokenUrl, { method: 'POST', headers, body: bodyStr, timeoutMs: 15000, retries: 2 });
-    if (!res.ok) {
-      const errBody = await res.text();
-      this.logger.error(`Token exchange failed for ${p.config.authUrl}: ${errBody}`);
-      throw new BadRequestException(`Token exchange failed: ${errBody}`);
+    const response = await safeFetch(tokenUrl, { method: 'POST', headers, body: bodyStr, timeoutMs: 15000, retries: 2 });
+    if (!response.ok) {
+      const errorBody = await response.text();
+      this.logger.error(`Token exchange failed for ${tokenExchangeParams.config.authUrl}: ${errorBody}`);
+      throw new BadRequestException(`Token exchange failed: ${errorBody}`);
     }
-    return res.json();
+    return response.json();
   }
 
-  async upsertIntegration(data: {
+  async saveOrUpdateIntegration(data: {
     accountId:    string;
     provider:     string;
     apiDomain:    string;
@@ -227,14 +227,14 @@ export class OAuthService {
     clientSecret?: string;
     region?:      string | null;
   }): Promise<IntegrationEntity> {
-    const tenant = await this.tenantSvc.getOrCreate(data.accountId);
+    const tenant = await this.tenantService.getOrCreate(data.accountId);
 
-    const existing = await this.repo.findOne({
+    const existing = await this.integrationRepository.findOne({
       where:  { tenantId: tenant.id, accountId: data.accountId, provider: data.provider },
       select: ['id', 'refreshJobId'],
     });
 
-    const patch = {
+    const encryptedPatch = {
       apiDomain:        data.apiDomain,
       tokenType:        data.tokenType,
       expiresAt:        data.expiresAt,
@@ -255,16 +255,16 @@ export class OAuthService {
     let entity: IntegrationEntity;
     if (existing) {
       let refreshJobId: string | null = null;
-      if (patch.expiresAt && patch.refreshTokenEnc) {
-        refreshJobId = await this.refreshQueue.scheduleRefresh(existing.id, patch.expiresAt);
+      if (encryptedPatch.expiresAt && encryptedPatch.refreshTokenEnc) {
+        refreshJobId = await this.refreshQueue.scheduleRefresh(existing.id, encryptedPatch.expiresAt);
       }
-      await this.repo.update(existing.id, { ...patch, ...(refreshJobId ? { refreshJobId } : {}) });
-      entity = await this.repo.findOneOrFail({ where: { id: existing.id, accountId: data.accountId } });
+      await this.integrationRepository.update(existing.id, { ...encryptedPatch, ...(refreshJobId ? { refreshJobId } : {}) });
+      entity = await this.integrationRepository.findOneOrFail({ where: { id: existing.id, accountId: data.accountId } });
     } else {
-      entity = await this.repo.save(this.repo.create({ tenantId: tenant.id, accountId: data.accountId, provider: data.provider, ...patch }));
-      if (entity.expiresAt && patch.refreshTokenEnc) {
+      entity = await this.integrationRepository.save(this.integrationRepository.create({ tenantId: tenant.id, accountId: data.accountId, provider: data.provider, ...encryptedPatch }));
+      if (entity.expiresAt && encryptedPatch.refreshTokenEnc) {
         const refreshJobId = await this.refreshQueue.scheduleRefresh(entity.id, entity.expiresAt);
-        await this.repo.update(entity.id, { refreshJobId });
+        await this.integrationRepository.update(entity.id, { refreshJobId });
         entity.refreshJobId = refreshJobId;
       }
     }
@@ -273,25 +273,29 @@ export class OAuthService {
     return entity;
   }
 
-  decryptInPlace(entity: IntegrationEntity): IntegrationEntity {
+  decryptEntityTokens(entity: IntegrationEntity): IntegrationEntity {
     entity.accessToken  = entity.accessTokenEnc  ? this.encryption.decrypt(entity.accessTokenEnc)  : null;
     entity.refreshToken = entity.refreshTokenEnc ? this.encryption.decrypt(entity.refreshTokenEnc) : null;
     entity.credentials  = entity.credentialsEnc  ? JSON.parse(this.encryption.decrypt(entity.credentialsEnc)) : null;
     return entity;
   }
 
-  async decryptEntity(entity: IntegrationEntity): Promise<IntegrationEntity> {
+  async loadAndDecryptEntity(entity: IntegrationEntity): Promise<IntegrationEntity> {
     if (entity.accessTokenEnc !== undefined) {
-      return this.decryptInPlace(entity);
+      return this.decryptEntityTokens(entity);
     }
-    const full = await this.repo.findOne({
+    const fullEntity = await this.integrationRepository.findOne({
       where:  { id: entity.id as number, accountId: entity.accountId },
       select: ['id','accountId','provider','apiDomain','tokenType','email','expiresAt',
                'isActive','createdAt','updatedAt','accessTokenEnc','refreshTokenEnc','credentialsEnc',
                'clientIdEnc','clientSecretEnc'],
     });
-    if (!full) throw new NotFoundException('Integration not found.');
-    return this.decryptInPlace(full);
+    if (!fullEntity) throw new NotFoundException('Integration not found.');
+    return this.decryptEntityTokens(fullEntity);
+  }
+
+  async getOAuthState(state: string): Promise<any> {
+    return this.stateStore.get(state);
   }
 
   async acquireRefreshLock(integrationId: number): Promise<boolean> {
@@ -302,35 +306,32 @@ export class OAuthService {
     return this.stateStore.releaseRefreshLock(integrationId);
   }
 
-
-  private isAllowedRedirect(uri: string): boolean {
+  private isRedirectUriAllowed(uri: string): boolean {
     try {
-      const u = new URL(uri);
-      const allowed = (process.env.ALLOWED_REDIRECT_HOSTS || 'app.callerdesk.io,localhost,127.0.0.1')
+      const parsedUrl = new URL(uri);
+      const allowedHosts = (process.env.ALLOWED_REDIRECT_HOSTS || 'app.callerdesk.io,localhost,127.0.0.1')
         .split(',').map((s) => s.trim()).filter(Boolean);
-      return allowed.some((host) => u.hostname === host || u.hostname.endsWith(`.${host}`));
+      return allowedHosts.some((host) => parsedUrl.hostname === host || parsedUrl.hostname.endsWith(`.${host}`));
     } catch {
       return false;
     }
   }
 
-
-
-  private extractZohoRegion(query: Record<string, string>): string {
-    const server = query['accounts-server'] || '';
-    const m = server.match(/accounts\.zoho\.([a-z.]+)/i);
-    return m ? m[1] : 'com';
+  private extractRegionFromOAuthQuery(query: Record<string, string>): string {
+    const accountsServer = query['accounts-server'] || '';
+    const regionMatch = accountsServer.match(/accounts\.zoho\.([a-z.]+)/i);
+    return regionMatch ? regionMatch[1] : 'com';
   }
 
-  private resolveApiDomain(
+  private resolveApiDomainUrl(
     config:         OAuthProviderConfig,
     query:          Record<string, string>,
     metaSubdomain?: string,
   ): string {
     let domain = config.apiDomain;
     if (config.dynamicUrl && (query.shop || query.subdomain)) {
-      const sub = query.shop || query.subdomain;
-      domain = domain.replace('{shop}', sub).replace('{subdomain}', sub);
+      const subdomain = query.shop || query.subdomain;
+      domain = domain.replace('{shop}', subdomain).replace('{subdomain}', subdomain);
     }
     if (config.dynamicAuthUrl && metaSubdomain) {
       domain = domain.replace('{subdomain}', metaSubdomain);

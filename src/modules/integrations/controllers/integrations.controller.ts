@@ -46,9 +46,9 @@ export class IntegrationsController {
   private readonly logger = new Logger(IntegrationsController.name);
 
   constructor(
-    private readonly oauthSvc:      OAuthService,
-    private readonly tokenSvc:      TokenService,
-    private readonly credentialSvc: CredentialService,
+    private readonly oauthService:      OAuthService,
+    private readonly tokenService:      TokenService,
+    private readonly credentialService: CredentialService,
   ) {}
 
   @Post(':provider/connect')
@@ -96,11 +96,11 @@ export class IntegrationsController {
     const config = CRM_PROVIDERS[p];
     if (!config) throw new BadRequestException(`Provider "${p}" is not supported.`);
     if (config.authType === 'oauth') {
-      const result = await this.oauthSvc.getAuthUrl(p, req.accountId, body);
+      const result = await this.oauthService.buildAuthUrl(p, req.accountId, body);
       if (!result) throw new BadRequestException(`Missing OAuth config for provider: ${p}`);
       return result;
     }
-    return this.credentialSvc.connect(p, req.accountId, body);
+    return this.credentialService.connect(p, req.accountId, body);
   }
 
   @Get(':provider/token')
@@ -113,7 +113,7 @@ export class IntegrationsController {
   @ApiResponse({ status: 404, description: 'No active connection found' })
   async getToken(@Param('provider') provider: string, @Req() req: AuthReq) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
-    const entity = await this.tokenSvc.getTokenMeta(req.accountId, provider.toLowerCase());
+    const entity = await this.tokenService.getTokenMeta(req.accountId, provider.toLowerCase());
     return {
       provider:      entity.provider,
       user_id:       entity.accountId,
@@ -136,7 +136,7 @@ export class IntegrationsController {
   @ApiResponse({ status: 404, description: 'No active connection found' })
   async getDetail(@Param('provider') provider: string, @Req() req: AuthReq) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
-    return this.tokenSvc.getDetail(req.accountId, provider.toLowerCase());
+    return this.tokenService.getDetail(req.accountId, provider.toLowerCase());
   }
 
   @Post(':provider/refresh')
@@ -151,7 +151,7 @@ export class IntegrationsController {
   @ApiResponse({ status: 401, description: 'Refresh token revoked — reconnect required' })
   async refresh(@Param('provider') provider: string, @Req() req: AuthReq) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
-    const entity = await this.tokenSvc.refreshToken(req.accountId, provider.toLowerCase());
+    const entity = await this.tokenService.refreshToken(req.accountId, provider.toLowerCase());
     return {
       provider:      entity.provider,
       user_id:       entity.accountId,
@@ -173,7 +173,7 @@ export class IntegrationsController {
   @ApiResponse({ status: 404, description: 'No active connection found' })
   async disconnect(@Param('provider') provider: string, @Req() req: AuthReq) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
-    await this.tokenSvc.disconnect(req.accountId, provider.toLowerCase());
+    await this.tokenService.disconnect(req.accountId, provider.toLowerCase());
     return { success: true, provider: provider.toLowerCase(), message: `${provider} disconnected.` };
   }
 
@@ -182,7 +182,7 @@ export class IntegrationsController {
   @ApiResponse({ status: 200, description: 'List of connected integrations' })
   async statusAll(@Req() req: AuthReq) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
-    const list = await this.tokenSvc.getAllConnected(req.accountId);
+    const list = await this.tokenService.getAllConnected(req.accountId);
     return {
       user_id:      req.accountId,
       connected:    list.length > 0,
@@ -205,7 +205,7 @@ export class IntegrationsController {
   async status(@Param('provider') provider: string, @Req() req: AuthReq) {
     if (!req.accountId) throw new UnauthorizedException('Account identity missing from token.');
     try {
-      const entity = await this.tokenSvc.getTokenMeta(req.accountId, provider.toLowerCase());
+      const entity = await this.tokenService.getTokenMeta(req.accountId, provider.toLowerCase());
       return { connected: true, provider: provider.toLowerCase(), api_domain: entity.apiDomain,
                token_type: entity.tokenType, expires_at: entity.expiresAt, expired: entity.isTokenExpired() };
     } catch {
@@ -220,14 +220,14 @@ export class CallerdeskController {
   private readonly logger = new Logger(CallerdeskController.name);
 
   constructor(
-    private readonly tokenSvc: TokenService,
-    private readonly oauthSvc: OAuthService,
+    private readonly tokenService: TokenService,
+    private readonly oauthService: OAuthService,
   ) {}
 
   private async getProviderDetail(provider: string, body: Record<string, any>) {
     const userId = String(body?.user_id || body?.accountId || body?.account_id || '').trim();
     if (!userId) throw new BadRequestException('Missing user_id');
-    return this.tokenSvc.getDetail(userId, provider);
+    return this.tokenService.getDetail(userId, provider);
   }
 
   @Get('crm/:provider/auth')
@@ -262,7 +262,7 @@ export class CallerdeskController {
       throw new BadRequestException('client_id and client_secret are required (pass in query or set env vars).');
     }
 
-    const result = await this.oauthSvc.getAuthUrl(p, accountId, {
+    const result = await this.oauthService.buildAuthUrl(p, accountId, {
       client_id: resolvedClientId,
       client_secret: resolvedClientSecret,
       ...(redirectUri ? { redirect_uri: redirectUri } : {}),
@@ -299,13 +299,13 @@ export class CallerdeskController {
     const { code, state, ...rest } = body;
     if (!code || !state) throw new BadRequestException('Missing code or state');
 
-    const stateData = await this.oauthSvc['stateStore'].get(state);
+    const stateData = await this.oauthService.getOAuthState(state);
     if (!stateData) throw new BadRequestException('Invalid or expired state. Try connecting again.');
     const accountId = stateData.accountId || 'unknown';
 
     this.logger.log(`OAuth callback for ${p}, accountId: ${accountId}`);
 
-    const entity = await this.oauthSvc.handleOAuthCallback(p, code, state, accountId, rest);
+    const entity = await this.oauthService.handleOAuthCallback(p, code, state, accountId, rest);
     return {
       success:    true,
       provider:   p,
@@ -414,7 +414,7 @@ export class CallerdeskController {
   async allDetail(@Body() body: Record<string, any>) {
     const userId = String(body?.user_id || '').trim();
     if (!userId) throw new BadRequestException('Missing user_id');
-    return this.tokenSvc.getAllDetail(userId);
+    return this.tokenService.getAllDetail(userId);
   }
 
   @Get('oauth/callback/:provider')
@@ -436,13 +436,13 @@ export class CallerdeskController {
     if (!code || !state) {
       return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>Missing code or state in callback URL.</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=false"; }, 3000);</script></body></html>`;
     }
-    const stateData = await this.oauthSvc['stateStore'].get(state);
+    const stateData = await this.oauthService.getOAuthState(state);
     if (!stateData) {
       return `<html><body><h2>&#x274C; ${provider} connection failed</h2><p>Your authorization session expired. Please click Connect again.</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=false&error=expired_state"; }, 3000);</script></body></html>`;
     }
     const accountId = stateData.accountId || 'unknown';
     try {
-      const entity = await this.oauthSvc.handleOAuthCallback(provider.toLowerCase(), code, state, accountId, rest);
+      const entity = await this.oauthService.handleOAuthCallback(provider.toLowerCase(), code, state, accountId, rest);
       this.logger.log(`${provider} connected for accountId: ${entity.accountId} — tokens stored in DB`);
       return `<html><body><h2>&#x2705; ${provider} connected!</h2><p>Account: ${entity.accountId}</p><p>Tokens stored. Redirecting...</p><script>setTimeout(function(){ window.location.href="${panelUrl}?provider=${provider}&connected=true&accountId=${entity.accountId}"; }, 1500);</script></body></html>`;
     } catch (err: any) {
@@ -489,7 +489,8 @@ export class AuthController {
     if (!accountId) throw new BadRequestException('accountId is required');
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET not set');
-    const token = jwt.sign({ sub: accountId, accountId }, secret, { expiresIn: '7d' });
+    const expiresIn = (process.env.JWT_EXPIRATION || '7d') as any;
+    const token = jwt.sign({ sub: accountId, accountId }, secret, { expiresIn });
     return { token, accountId };
   }
 }
